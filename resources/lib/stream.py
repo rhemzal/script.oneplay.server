@@ -6,128 +6,176 @@ from resources.lib.channels import load_channels
 from resources.lib.session import load_session
 from resources.lib.epg import get_channel_epg
 from resources.lib.api import call_api
-from resources.lib.utils import get_config_value, api_version, log_error, is_debug
+from resources.lib.helpers import (
+    NO_ACCESS_URL,
+    extract_hls_url,
+    get_api_error,
+    is_truthy,
+    resolve_channel_internal_id,
+)
+from resources.lib.utils import get_config_value, api_version, is_debug, log_error
+
+PLAYBACK_CAPS = {
+    "protocols": ["dash", "hls"],
+    "drm": ["widevine", "fairplay"],
+    "altTransfer": "Unicast",
+    "subtitle": {"formats": ["vtt"], "locations": ["InstreamTrackLocation", "ExternalTrackLocation"]},
+    "liveSpecificCapabilities": {
+        "protocols": ["dash", "hls"],
+        "drm": ["widevine", "fairplay"],
+        "altTransfer": "Unicast",
+        "multipleAudio": False,
+    },
+}
+
+
+def _parental_pin():
+    pin = get_config_value('pin')
+    if pin is not None and len(pin) > 0:
+        return pin
+    return '1234'
+
 
 def get_channel_id(channel_name):
-    channels = load_channels()
-    channel_id = -1
-    for channel in channels:
-        if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true': 
-            if channels[channel]['name'].replace(' HD', '') == channel_name:
-                channel_id = channel
-        else:
-            if channels[channel]['name'] == channel_name:
-                channel_id = channel
-    return channel_id
+    return resolve_channel_internal_id(
+        load_channels(),
+        channel_name,
+        strip_hd=is_truthy(get_config_value('odstranit_hd')),
+    )
 
-def get_live(id):
+
+def get_live(channel_ref):
     token = load_session()
     channels = load_channels()
-    for channel in channels:
-        if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true': 
-            if channels[channel]['name'].replace(' HD', '') == id:
-                id = channels[channel]['id']
+    channel_id = resolve_channel_internal_id(
+        channels,
+        channel_ref,
+        strip_hd=is_truthy(get_config_value('odstranit_hd')),
+    )
+    if channel_id is None:
+        if '~' in str(channel_ref):
+            channel_id = str(channel_ref)
         else:
-            if channels[channel]['name'] == id:
-                id = channels[channel]['id']
-    if '~' in id:
-        md = True
-        channel = id.split('~')
-        id = channel[0]
-        md_stream = int(channel[1])
+            channel_id = channel_ref
     else:
-        md = False
+        channel_ref = channel_id
 
-    if channels[id]['adult'] == True:
-        if get_config_value('pin') is not None and len(get_config_value('pin')) > 0:
-            pin = get_config_value('pin')
-        else:
-            pin = '1234'
-        post = {"authorization":[{"schema":"PinRequestAuthorization","pin":pin,"type":"parental"}],"payload":{"criteria":{"schema":"ContentCriteria","contentId":"channel." + id},"startMode":"start"},"playbackCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","subtitle":{"formats":["vtt"],"locations":["InstreamTrackLocation","ExternalTrackLocation"]},"liveSpecificCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","multipleAudio":False}}}
+    md = False
+    md_stream = 0
+    if '~' in str(channel_id):
+        md = True
+        base_id, md_stream = str(channel_id).split('~', 1)
+        channel_id = base_id
+        md_stream = int(md_stream)
+
+    if channel_id not in channels:
+        log_error('Neznámý kanál', channel_ref)
+        return NO_ACCESS_URL
+
+    if channels[channel_id]['adult']:
+        post = {
+            "authorization": [{"schema": "PinRequestAuthorization", "pin": _parental_pin(), "type": "parental"}],
+            "payload": {"criteria": {"schema": "ContentCriteria", "contentId": "channel." + channel_id}, "startMode": "start"},
+            "playbackCapabilities": PLAYBACK_CAPS,
+        }
     else:
-        post = {"payload":{"criteria":{"schema":"ContentCriteria","contentId":"channel." + id},"startMode":"start"},"playbackCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","subtitle":{"formats":["vtt"],"locations":["InstreamTrackLocation","ExternalTrackLocation"]},"liveSpecificCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","multipleAudio":False}}}
-    data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data = post, token = token)
-    if 'err' in data:
+        post = {
+            "payload": {"criteria": {"schema": "ContentCriteria", "contentId": "channel." + channel_id}, "startMode": "start"},
+            "playbackCapabilities": PLAYBACK_CAPS,
+        }
+
+    data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+    if get_api_error(data):
         post['payload']['startMode'] = 'live'
-        data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data = post, token = token)
-    if md == True and 'liveControl' in data['playerControl'] and 'mosaic' in data['playerControl']['liveControl']:
+        data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+
+    live_control = data.get('playerControl', {}).get('liveControl', {})
+    if md and 'mosaic' in live_control:
         stream_number = 1
-        for md_item in data['playerControl']['liveControl']['mosaic']['items']:
+        for md_item in live_control.get('mosaic', {}).get('items', []):
             if md_stream == stream_number:
-                md_id = None
-                if 'criteria' in md_item['play']['params']['payload'] and 'contentId' in md_item['play']['params']['payload']['criteria']:
-                    md_id = md_item['play']['params']['payload']['criteria']['contentId']
-                elif 'contentId' in md_item['play']['params']['payload']:
-                    md_id = md_item['play']['params']['payload']['contentId']
+                payload = md_item.get('play', {}).get('params', {}).get('payload', {})
+                criteria = payload.get('criteria', {})
+                md_id = criteria.get('contentId') or payload.get('contentId')
                 if md_id is not None:
-                    post = {"payload":{"criteria":{"schema":"MDPlaybackCriteria","contentId":md_id,"position":0},"startMode":"start"},"playbackCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","subtitle":{"formats":["vtt"],"locations":["InstreamTrackLocation","ExternalTrackLocation"]},"liveSpecificCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","multipleAudio":False}}}
-                    data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data = post, token = token)
-                    if 'err' in data or 'media' not in data:
-                        url = 'http://sledovanietv.sk/download/noAccess-cs.m3u8'
-                        return url
-            stream_number = stream_number + 1
-    url = 'http://sledovanietv.sk/download/noAccess-cs.m3u8'
-    if 'playerControl' in data and 'liveControl' in data['playerControl'] and 'channelId' in data['playerControl']['liveControl'] and 'timeline' in data['playerControl']['liveControl']:
-        if 'timeShift' in data['playerControl']['liveControl']['timeline'] and data['playerControl']['liveControl']['timeline']['timeShift']['available'] == False:
-            post.update({'payload' : {'criteria' : post['payload']['criteria'], 'startMode' : 'live'}})
-            data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data = post, token = token)
-    if 'media' not in data or 'stream' not in data.get('media', {}) or 'assets' not in data.get('media', {}).get('stream', {}):
+                    md_post = {
+                        "payload": {"criteria": {"schema": "MDPlaybackCriteria", "contentId": md_id, "position": 0}, "startMode": "start"},
+                        "playbackCapabilities": PLAYBACK_CAPS,
+                    }
+                    data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=md_post, token=token)
+                    if get_api_error(data) or 'media' not in data:
+                        return NO_ACCESS_URL
+            stream_number += 1
+
+    timeline = live_control.get('timeline', {})
+    time_shift = timeline.get('timeShift', {})
+    if time_shift.get('available') is False:
+        post.update({'payload': {'criteria': post['payload']['criteria'], 'startMode': 'live'}})
+        data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+
+    url = extract_hls_url(data)
+    if url == NO_ACCESS_URL:
         detail = str(data) if is_debug() else None
-        log_error('Nepodařilo se získat stream pro kanál ' + str(id), detail)
-        return url
-    for asset in data['media']['stream']['assets']:
-        if asset['protocol'] == 'hls':
-            if 'drm' not in asset:
-                if 'clear' not in asset['src']:
-                    url = asset['src']
-                elif url == 'http://sledovanietv.sk/download/noAccess-cs.m3u8':
-                    url = asset['src']
+        log_error('Nepodařilo se získat stream pro kanál ' + str(channel_ref), detail)
     return url
 
+
 def get_archive(channel_name, start_ts, end_ts):
-    url = 'http://sledovanietv.sk/download/noAccess-cs.m3u8'
     start_ts = int(start_ts)
     end_ts = int(end_ts)
     token = load_session()
     channel_id = get_channel_id(channel_name)
-    if '~' in channel_id:
-        md = True
-    else:
-        md = False
-    channels = load_channels()
-    epg = get_channel_epg(channel_id = channel_id, from_ts = start_ts, to_ts = end_ts + 60*60*12)
-    if start_ts in epg:
-        if epg[start_ts]['endts'] > int(time.mktime(datetime.now().timetuple()))-10:
-            return get_live(channel_name)
-        else:
-            if channels[channel_id]['adult'] == True:
-                if get_config_value('pin') is not None and len(get_config_value('pin')) > 0:
-                    pin = get_config_value('pin')
-                else:
-                    pin = '1234'
-                post = {"authorization":[{"schema":"PinRequestAuthorization","pin":pin,"type":"parental"}],"payload":{"criteria":{'schema': 'ChannelPlaybackCriteria', 'channel': epg[start_ts]['payload']['deeplink']['channel'], 'time': epg[start_ts]['payload']['deeplink']['time']}},"playbackCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","subtitle":{"formats":["vtt"],"locations":["InstreamTrackLocation","ExternalTrackLocation"]},"liveSpecificCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","multipleAudio":False}}}
-            else:
-                if md == True:
-                    post = {"payload":{"criteria":{"schema":"MDPlaybackCriteria","contentId":epg[start_ts]['id'],"position":0}},"playbackCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","subtitle":{"formats":["vtt"],"locations":["InstreamTrackLocation","ExternalTrackLocation"]},"liveSpecificCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","multipleAudio":False}}}
-                else:
-                    payload = None
-                    data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/page.content.display', data = {'payload': epg[start_ts]['payload']}, token = token)
-                    for block in data.get('layout', {}).get('blocks', []):
-                        schema = block.get('schema')
-                        if not payload and schema == 'ContentHeaderBlock':
-                            action = block.get('mainAction', {}).get('action', {})
-                            if action.get('call') == 'content.play':
-                                payload = action.get('params', {}).get('payload')
-                    post = {"payload":payload, "playbackCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","subtitle":{"formats":["vtt"],"locations":["InstreamTrackLocation","ExternalTrackLocation"]},"liveSpecificCapabilities":{"protocols":["dash","hls"],"drm":["widevine","fairplay"],"altTransfer":"Unicast","multipleAudio":False}}}                                        
-            data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data = post, token = token)
-            url = 'http://sledovanietv.sk/download/noAccess-cs.m3u8'
-            for asset in data['media']['stream']['assets']:
-                if asset['protocol'] == 'hls':
-                    if 'drm' not in asset:
-                        if 'free' not in asset['src']:
-                            url = asset['src']
-                        elif url == 'http://sledovanietv.sk/download/noAccess-cs.m3u8':
-                            url = asset['src']
-            return url            
-    else:
+    if channel_id in (-1, None, ''):
+        log_error('Neznámý kanál pro archiv', channel_name)
         return get_live(channel_name)
+
+    md = '~' in str(channel_id)
+    channels = load_channels()
+    if channel_id not in channels:
+        return get_live(channel_name)
+
+    epg = get_channel_epg(channel_id=channel_id, from_ts=start_ts, to_ts=end_ts + 60 * 60 * 12)
+    if start_ts not in epg:
+        return get_live(channel_name)
+
+    if epg[start_ts]['endts'] > int(time.mktime(datetime.now().timetuple())) - 10:
+        return get_live(channel_name)
+
+    if channels[channel_id]['adult']:
+        deeplink = (epg[start_ts].get('payload') or {}).get('deeplink') or {}
+        post = {
+            "authorization": [{"schema": "PinRequestAuthorization", "pin": _parental_pin(), "type": "parental"}],
+            "payload": {
+                "criteria": {
+                    'schema': 'ChannelPlaybackCriteria',
+                    'channel': deeplink.get('channel'),
+                    'time': deeplink.get('time'),
+                }
+            },
+            "playbackCapabilities": PLAYBACK_CAPS,
+        }
+    elif md:
+        post = {
+            "payload": {"criteria": {"schema": "MDPlaybackCriteria", "contentId": epg[start_ts]['id'], "position": 0}},
+            "playbackCapabilities": PLAYBACK_CAPS,
+        }
+    else:
+        payload = None
+        page_data = call_api(
+            url='https://http.cms.jyxo.cz/api/' + api_version + '/page.content.display',
+            data={'payload': epg[start_ts].get('payload')},
+            token=token,
+        )
+        for block in page_data.get('layout', {}).get('blocks', []):
+            if block.get('schema') == 'ContentHeaderBlock':
+                action = block.get('mainAction', {}).get('action', {})
+                if action.get('call') == 'content.play':
+                    payload = action.get('params', {}).get('payload')
+                    break
+        if payload is None:
+            log_error('Nepodařilo se získat payload archivu', channel_name)
+            return NO_ACCESS_URL
+        post = {"payload": payload, "playbackCapabilities": PLAYBACK_CAPS}
+
+    data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+    return extract_hls_url(data)

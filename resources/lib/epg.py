@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from resources.lib.api import call_api
 from resources.lib.session import load_session
 from resources.lib.channels import load_channels
-from resources.lib.utils import replace_by_html_entity, get_config_value, save_json_data, load_json_data, display_message, api_version
+from resources.lib.helpers import is_truthy, channel_display_name, parse_epg_item_action
+from resources.lib.utils import replace_by_html_entity, get_config_value, save_json_data, load_json_data, display_message, log_error, api_version
 
 def get_channel_epg(channel_id, from_ts, to_ts):
     token = load_session()
@@ -19,16 +20,15 @@ def get_channel_epg(channel_id, from_ts, to_ts):
     post = {"payload":{"criteria":{"channelSetId":"channel_list.1","viewport":{"channelRange":{"from":0,"to":200},"timeRange":{"from":datetime.fromtimestamp(from_ts-7200).strftime('%Y-%m-%dT%H:%M:%S') + '.000Z',"to":datetime.fromtimestamp(to_ts-3600).strftime('%Y-%m-%dT%H:%M:%S') + '.000Z'},"schema":"EpgViewportAbsolute"}},"requestedOutput":{"channelList":"none","datePicker":False,"channelSets":False}}}
     data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/epg.display', data = post, token = token)
     if 'err' not in data:
-        for channel in data['schedule']:
-            if channel['channelId'] == channel_id:
-                for item in channel['items']:
+        for channel in data.get('schedule', []):
+            if channel.get('channelId') == channel_id:
+                for item in channel.get('items', []):
                     startts = int(datetime.fromisoformat(item['startAt']).timestamp())
                     endts = int(datetime.fromisoformat(item['endAt']).timestamp())
-                    if item['actions'][0]['params']['contentType'] in ['show','movie'] and 'contentId' not in item['actions'][0]['params']['payload']:
-                        id = item['actions'][0]['params']['payload']['deeplink']['epgItem']
-                    else:
-                        id = item['actions'][0]['params']['payload']['contentId']
-                    payload = item['actions'][0]['params']['payload']
+                    content_id, payload = parse_epg_item_action(item)
+                    if content_id is None:
+                        continue
+                    id = content_id
                     if md_stream > 0 and len(item['labels']) > 0 and 'name' in item['labels'][0] and item['labels'][0]['name'] == 'content.plugin_mapper.collection_detail_plugin_mapper.action.multi_dimension':
                         stream_number = 1
                         post = {"payload":{"contentId":id}}
@@ -61,16 +61,14 @@ def get_day_epg(from_ts, to_ts):
     if 'err' in data:
         data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/epg.display', data = post, token = token)
     if 'err' not in data:
-        for channel in data['schedule']:
-            if channel['channelId'] in channels:
-                for item in channel['items']:
+        for channel in data.get('schedule', []):
+            if channel.get('channelId') in channels:
+                for item in channel.get('items', []):
                     startts = int(datetime.fromisoformat(item['startAt']).timestamp())
                     endts = int(datetime.fromisoformat(item['endAt']).timestamp())
-                    if 'contentType' in item['actions'][0]['params'] or 'contentId' in item['actions'][0]['params']['payload']:
-                        if item['actions'][0]['params']['contentType'] == 'show'  and 'contentId' not in item['actions'][0]['params']['payload']:
-                            id = item['actions'][0]['params']['payload']['deeplink']['epgItem']
-                        else:
-                            id = item['actions'][0]['params']['payload']['contentId']
+                    content_id, _payload = parse_epg_item_action(item)
+                    if content_id is not None:
+                        id = content_id
                         if len(item['labels']) > 0:
                             if 'Oneplay Sport ' in channels[channel['channelId']]['name']:
                                 stream_number = 1
@@ -133,10 +131,7 @@ def get_epg():
                 logo = channels[id]['logo']
                 if logo is None:
                     logo = ''
-                if get_config_value('odstranit_hd') == 1  or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-                    channel_name = channels[id]['name'].replace(' HD', '')
-                else:
-                    channel_name = channels[id]['name']
+                channel_name = channel_display_name(channels[id]['name'], strip_hd=is_truthy(get_config_value('odstranit_hd')))
                 output += '    <channel id="' + replace_by_html_entity(channel_name) + '">\n'
                 output += '            <display-name lang="cs">' +  replace_by_html_entity(channel_name) + '</display-name>\n'
                 output += '            <icon src="' + logo + '" />\n'
@@ -153,10 +148,10 @@ def get_epg():
                     starttime = datetime.fromtimestamp(epg_item['startts']).strftime('%Y%m%d%H%M%S')
                     endtime = datetime.fromtimestamp(epg_item['endts']).strftime('%Y%m%d%H%M%S')
                     if epg_item['channel_id'] in channels:
-                        if get_config_value('odstranit_hd') == 1  or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-                            channel_name = channels[epg_item['channel_id']]['name'].replace(' HD', '')
-                        else:
-                            channel_name = channels[epg_item['channel_id']]['name']
+                        channel_name = channel_display_name(
+                            channels[epg_item['channel_id']]['name'],
+                            strip_hd=is_truthy(get_config_value('odstranit_hd')),
+                        )
                         content = content + '    <programme start="' + starttime + ' +0' + str(tz_offset) + '00" stop="' + endtime + ' +0' + str(tz_offset) + '00" channel="' +  replace_by_html_entity(channel_name) + '">\n'
                         content = content + '       <title lang="cs">' +  replace_by_html_entity(epg_item['title']) + '</title>\n'
                         if epg_item['description'] != None and len(epg_item['description']) > 0:
@@ -170,7 +165,8 @@ def get_epg():
                             cnt = 0
                 output += content
             output += '</tv>\n'
-        except Exception:
+        except Exception as error:
+            log_error('Chyba při stahování EPG', str(error))
             display_message('Chyba při stahování EPG!')
     return output                                        
 

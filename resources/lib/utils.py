@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 import os
 import socket
+import threading
 
 import codecs
 import json
 from xml.dom import minidom
 import ipaddress
-import sys
+
+_file_locks = {}
+_file_locks_guard = threading.Lock()
 
 class OneplayError(Exception):
     def __init__(self, message, detail=None):
@@ -94,39 +97,50 @@ def display_message(message):
     else:
         print('Oneplay Server > ' + message, flush=True)
 
-def save_json_data(file, data):
+def _get_data_dir():
     if is_kodi() == True:
         import xbmcaddon
         from xbmcvfs import translatePath
         addon = xbmcaddon.Addon()
-        addon_userdata_dir = translatePath(addon.getAddonInfo('profile'))
-    else:
-        addon_userdata_dir = os.path.join(get_script_path(), 'data')
+        return translatePath(addon.getAddonInfo('profile'))
+    return os.path.join(get_script_path(), 'data')
+
+
+def _get_file_lock(filename):
+    with _file_locks_guard:
+        if filename not in _file_locks:
+            _file_locks[filename] = threading.Lock()
+        return _file_locks[filename]
+
+
+def save_json_data(file, data):
+    addon_userdata_dir = _get_data_dir()
     filename = os.path.join(addon_userdata_dir, file['filename'])
-    try:
-        with open(filename, "w") as f:
-            f.write('%s\n' % data)
-    except IOError:
-        display_message('Chyba uložení ' + file['description'])
+    lock = _get_file_lock(filename)
+    with lock:
+        try:
+            os.makedirs(addon_userdata_dir, exist_ok=True)
+            temp_name = filename + '.tmp'
+            with open(temp_name, 'w', encoding='utf-8') as handle:
+                handle.write('%s\n' % data)
+            os.replace(temp_name, filename)
+        except OSError:
+            display_message('Chyba uložení ' + file['description'])
+
 
 def load_json_data(file):
-    data = None
-    if is_kodi() == True:
-        import xbmcaddon
-        from xbmcvfs import translatePath
-        addon = xbmcaddon.Addon()
-        addon_userdata_dir = translatePath(addon.getAddonInfo('profile'))
-    else:
-        addon_userdata_dir = os.path.join(get_script_path(), 'data')
+    addon_userdata_dir = _get_data_dir()
     filename = os.path.join(addon_userdata_dir, file['filename'])
-    try:
-        with open(filename, "r") as f:
-            for row in f:
-                data = row[:-1]
-    except IOError as error:
-        if error.errno != 2:
-            display_message('Chyba při načtení ' + file['description'])
-    return data    
+    lock = _get_file_lock(filename)
+    with lock:
+        try:
+            with open(filename, 'r', encoding='utf-8') as handle:
+                for row in handle:
+                    return row[:-1]
+        except OSError as error:
+            if error.errno != 2:
+                display_message('Chyba při načtení ' + file['description'])
+    return None
 
 def replace_by_html_entity(string):
     return string.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace("'","&apos;").replace('"',"&quot;")

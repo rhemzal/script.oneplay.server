@@ -1,3 +1,6 @@
+.venv/
+.pytest_cache/
+
 # lokální konfigurace (vzor config.txt.sample zůstává v repu)
 config.txt
 config.txt.*

@@ -2,7 +2,7 @@
 import os
 
 from urllib.parse import quote, unquote
-from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, HTTPError, TEMPLATE_PATH, install
+from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, HTTPError, TEMPLATE_PATH, install, abort
 import traceback
 import json
 import base64
@@ -13,6 +13,7 @@ from resources.lib.session import load_session
 from resources.lib.channels import load_channels, load_diasbled_channels, save_disabled_channels
 from resources.lib.epg import get_epg, load_epg, get_live_epg, get_channel_epg
 from resources.lib.stream import get_live, get_archive
+from resources.lib.helpers import is_truthy, resolve_channel_name_by_number
 from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist, OneplayError, log_error, is_debug
 
 
@@ -97,7 +98,6 @@ def epg_now():
 
 @route('/epg_channel/<channel_id>/<day_offset:int>')
 def epg_channel(channel_id, day_offset):
-    import json
     from datetime import datetime as dt
     import time as t
     today = dt.today()
@@ -124,21 +124,19 @@ def playlist():
     headers = {'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0', 'Accept-Encoding' : 'gzip, deflate, br, zstd', 'Accept' : '*/*'}
     channels = load_channels()
     base_url = get_base_url()
+    strip_hd = is_truthy(get_config_value('odstranit_hd'))
+    use_numbers = is_truthy(get_config_value('pouzivat_cisla_kanalu'))
     output = '#EXTM3U x-tvg-url="' + base_url + '/epg"\n'
     for channel in channels:
         if channels[channel]['visible'] == True:
-            if channels[channel]['logo'] == None:
-                logo = ''
-            else:
-                logo =  channels[channel]['logo']
-            if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-                channel_name = channels[channel]['name'].replace(' HD', '')
-            else:
+            logo = channels[channel]['logo'] or ''
+            channel_name = resolve_channel_name_by_number(channels, channels[channel]['channel_number'], strip_hd=strip_hd)
+            if channel_name is None:
                 channel_name = channels[channel]['name']
             output += '#EXTINF:-1 provider="Oneplay" tvg-chno="' + str(channels[channel]['channel_number']) + '" tvg-name="' + channel_name + '" tvg-logo="' + logo + '" catchup-days="7" catchup="shift", ' + channel_name + '\n'
             output += '#KODIPROP:inputstream.adaptive.stream_headers=' + urlencode(headers) + '\n'
             output += '#KODIPROP:inputstream.adaptive.manifest_headers=' + urlencode(headers) + '\n'
-            if get_config_value('pouzivat_cisla_kanalu') == None or get_config_value('pouzivat_cisla_kanalu') == 0 or get_config_value('pouzivat_cisla_kanalu') == '0' or get_config_value('pouzivat_cisla_kanalu') == 'false':
+            if not use_numbers:
                 output += base_url + '/play/' + quote(channel_name.replace('/', 'sleš')) + '.m3u8\n'
             else:
                 output += base_url + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8\n'
@@ -149,22 +147,20 @@ def playlist():
 def playlist_tvheadend():
     channels = load_channels()
     base_url = get_base_url()
+    strip_hd = is_truthy(get_config_value('odstranit_hd'))
+    use_numbers = is_truthy(get_config_value('pouzivat_cisla_kanalu'))
     output = '#EXTM3U x-tvg-url="' + base_url + '/epg"\n'
     ffmpeg = get_config_value('cesta_ffmpeg')
     if ffmpeg == None or len(ffmpeg) == 0:
         ffmpeg = '/usr/bin/ffmpeg'
     for channel in channels:
         if channels[channel]['visible'] == True:
-            if channels[channel]['logo'] == None:
-                logo = ''
-            else:
-                logo =  channels[channel]['logo']
-            if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-                channel_name = channels[channel]['name'].replace(' HD', '')
-            else:
+            logo = channels[channel]['logo'] or ''
+            channel_name = resolve_channel_name_by_number(channels, channels[channel]['channel_number'], strip_hd=strip_hd)
+            if channel_name is None:
                 channel_name = channels[channel]['name']
             output += '#EXTINF:-1 provider="Oneplay" tvg-chno="' + str(channels[channel]['channel_number']) + '" tvg-name="' + channel_name + '" tvg-logo="' + logo + '", ' + channel_name + '\n'
-            if get_config_value('pouzivat_cisla_kanalu') == None or get_config_value('pouzivat_cisla_kanalu') == 0 or get_config_value('pouzivat_cisla_kanalu') == '0' or get_config_value('pouzivat_cisla_kanalu') == 'false':
+            if not use_numbers:
                 output += 'pipe://' + ffmpeg + ' -loglevel error -fflags +genpts -i "' + base_url + '/play/' + quote(channel_name.replace('/', 'sleš')) + '.m3u8" -f mpegts -c copy -vcodec copy -acodec copy -metadata service_provider=Oneplay -metadata service_name="' + channel_name + '" pipe:1\n'
             else:
                 output += 'pipe://' + ffmpeg + ' -loglevel error -fflags +genpts -i "' + base_url + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8" -f mpegts -c copy -vcodec copy -acodec copy -metadata service_provider=Oneplay -metadata service_name="' + channel_name + '" pipe:1\n'
@@ -173,7 +169,6 @@ def playlist_tvheadend():
 
 @route('/stream_url/<channel>')
 def stream_url(channel):
-    import json
     try:
         channel = unquote(channel.replace('.m3u8', '')).replace('sleš', '/')
         if 'start_ts' in request.query and 'end_ts' in request.query:
@@ -207,12 +202,14 @@ def play(channel):
 
 @route('/play_num/<channel>')
 def play_num(channel):
-    channels = load_channels()
-    for chan in channels:
-        if channels[chan]['channel_number'] == int(channel.replace('.m3u8', '')):
-            channel_name = channels[chan]['name']
-    if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-        channel_name = channel.replace(' HD', '')
+    channel_number = int(channel.replace('.m3u8', ''))
+    channel_name = resolve_channel_name_by_number(
+        load_channels(),
+        channel_number,
+        strip_hd=is_truthy(get_config_value('odstranit_hd')),
+    )
+    if channel_name is None:
+        abort(404, 'Kanál nenalezen')
     if 'start_ts' in request.query:
         stream = get_archive(channel_name, request.query['start_ts'], request.query['end_ts'])
     elif 'utc' in request.query:
@@ -228,7 +225,10 @@ def add_image(image):
 
 @route('/config')
 def config():
-    config = {}
+    ip = request.environ.get('REMOTE_ADDR', '')
+    if not check_client_network(ip) and not check_ip_whitelist(ip):
+        abort(403, 'Přístup odepřen')
+    config_data = {}
     params = ['username', 'password', 'profile', 'deviceid', 'webserver_ip', 'webserver_port', 'epg_dnu_zpetne', 'epg_dnu_dopredu', 'interval_stahovani_epg', 'odstranit_hd', 'pouzivat_cisla_kanalu', 'poradi_sluzby', 'pin', 'debug', 'cesta_ffmpeg', 'auth_user', 'auth_pass']
     for param in params:
         if get_config_value(param) is None:
@@ -236,11 +236,11 @@ def config():
         else:
             value = get_config_value(param)
         if param in ['password', 'auth_pass'] and value != 'není':
-            config.update({param : '*' * len(value)})
+            config_data.update({param : '*' * len(value)})
         else:
-            config.update({param : value})
+            config_data.update({param : value})
     response.content_type = 'application/json'
-    return json.dumps(config)
+    return json.dumps(config_data)
 
 @route('/channel/<channel>/<status>')
 def channel(channel, status):
@@ -274,27 +274,29 @@ def page():
     epg_url = base_url_with_auth + '/epg'
     playlist = []
     channels = load_channels()
-    if get_config_value('pouzivat_cisla_kanalu') == None or get_config_value('pouzivat_cisla_kanalu') == 0 or get_config_value('pouzivat_cisla_kanalu') == '0' or get_config_value('pouzivat_cisla_kanalu') == 'false':
-        for channel in channels:
-            if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-                channel_name = channels[channel]['name'].replace(' HD', '')
-            else:
-                channel_name = channels[channel]['name']
-            playlist.append({'name' : channel_name, 'url' : base_url_with_auth + '/play/' + quote(channel_name.replace('/', 'sleš')) + '.m3u8', 'slug' : quote(channel_name.replace('/', 'sleš')) + '.m3u8', 'logo' : channels[channel]['logo'], 'channel_id' : channel, 'liveOnly' : channels[channel].get('liveOnly', False), 'visible' : channels[channel]['visible']})
-    else:
-        for channel in channels:
-            if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-                channel_name = channels[channel]['name'].replace(' HD', '')
-            else:
-                channel_name = channels[channel]['name']
-            playlist.append({'name' : channel_name, 'url' : base_url_with_auth + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8', 'slug' : quote(channel_name.replace('/', 'sleš')) + '.m3u8', 'logo' : channels[channel]['logo'], 'channel_id' : channel, 'liveOnly' : channels[channel].get('liveOnly', False), 'visible' : channels[channel]['visible']})
-            print(channels[channel]['visible'])
+    strip_hd = is_truthy(get_config_value('odstranit_hd'))
+    use_numbers = is_truthy(get_config_value('pouzivat_cisla_kanalu'))
+    for channel in channels:
+        channel_name = resolve_channel_name_by_number(channels, channels[channel]['channel_number'], strip_hd=strip_hd)
+        if channel_name is None:
+            channel_name = channels[channel]['name']
+        entry = {
+            'name' : channel_name,
+            'slug' : quote(channel_name.replace('/', 'sleš')) + '.m3u8',
+            'logo' : channels[channel]['logo'],
+            'channel_id' : channel,
+            'liveOnly' : channels[channel].get('liveOnly', False),
+            'visible' : channels[channel]['visible'],
+        }
+        if not use_numbers:
+            entry['url'] = base_url_with_auth + '/play/' + quote(channel_name.replace('/', 'sleš')) + '.m3u8'
+        else:
+            entry['url'] = base_url_with_auth + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8'
+        playlist.append(entry)
     TEMPLATE_PATH.append(os.path.join(get_script_path(), 'resources', 'templates'))
-    auth_enabled = bool(get_config_value('auth_user') and get_config_value('auth_pass'))
     return template('form.tpl', version = get_version(), message = message, warning = warning, playlist_url = playlist_url, playlist_tvheadend_url = playlist_tvheadend_url, epg_url = epg_url, playlist = playlist, auth_enabled = auth_enabled, player_enabled = player_enabled)
 
 def start_server():
     install(OneplayErrorPlugin())
     port = int(get_config_value('webserver_port'))
     run(host = '0.0.0.0', port = port, debug = False)
-
