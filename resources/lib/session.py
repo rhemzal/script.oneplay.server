@@ -25,8 +25,9 @@ _session_lock = threading.RLock()
 
 def _fail_login(message, data=None):
     global _login_failure_until, _login_failure_message
-    _login_failure_until = int(time.time()) + 300
-    _login_failure_message = message
+    with _session_lock:
+        _login_failure_until = int(time.time()) + 300
+        _login_failure_message = message
     detail = str(data) if data is not None and is_debug() else None
     raise_error(message, detail)
 
@@ -63,8 +64,9 @@ def _perform_login():
                 message = message + ': ' + api_error
             _fail_login(message, data)
 
-    _login_failure_until = 0
-    _login_failure_message = ''
+    with _session_lock:
+        _login_failure_until = 0
+        _login_failure_message = ''
     token = data['step']['bearerToken']
     deviceId = data['step']['currentUser']['currentDevice']['id']
     post = {"payload":{"id":deviceId,"name": get_config_value('deviceid')}}

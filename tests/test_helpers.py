@@ -91,6 +91,19 @@ def test_collect_account_ids_fallback_without_flags():
     assert collect_account_ids(step) == ['only-id-1', 'only-id-2']
 
 
+def test_collect_account_ids_skips_active_without_account_id():
+    step = {
+        'groups': [
+            {'accounts': [
+                {'isActive': True},
+                {'extId': 'ext-1'},
+                {'accountId': 'fallback-id'},
+            ]}
+        ]
+    }
+    assert collect_account_ids(step) == ['fallback-id']
+
+
 def test_channel_display_name_strip_hd():
     assert channel_display_name('Nova HD', strip_hd=True) == 'Nova'
     assert channel_display_name('Nova HD', strip_hd=False) == 'Nova HD'

@@ -2,7 +2,7 @@
 import os
 
 from urllib.parse import quote, unquote
-from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, HTTPError, TEMPLATE_PATH, install, abort
+from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, HTTPError, TEMPLATE_PATH, install, abort, default_app
 import traceback
 import json
 import base64
@@ -296,7 +296,14 @@ def page():
     TEMPLATE_PATH.append(os.path.join(get_script_path(), 'resources', 'templates'))
     return template('form.tpl', version = get_version(), message = message, warning = warning, playlist_url = playlist_url, playlist_tvheadend_url = playlist_tvheadend_url, epg_url = epg_url, playlist = playlist, auth_enabled = auth_enabled, player_enabled = player_enabled)
 
-def start_server():
+def _ensure_error_plugin():
+    for plugin in default_app().plugins:
+        if getattr(plugin, 'name', None) == OneplayErrorPlugin.name:
+            return
     install(OneplayErrorPlugin())
+
+
+def start_server():
+    _ensure_error_plugin()
     port = int(get_config_value('webserver_port'))
     run(host = '0.0.0.0', port = port, debug = False)

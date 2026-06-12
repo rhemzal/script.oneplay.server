@@ -45,8 +45,9 @@ def collect_account_items(step):
 def collect_account_ids(step):
     account_ids = []
     for acc in collect_account_items(step):
-        if acc.get('extId') or acc.get('isActive'):
-            account_ids.append(acc['accountId'])
+        account_id = acc.get('accountId')
+        if account_id and (acc.get('extId') or acc.get('isActive')):
+            account_ids.append(account_id)
     if not account_ids:
         account_ids = [acc['accountId'] for acc in collect_account_items(step) if acc.get('accountId')]
     return account_ids
