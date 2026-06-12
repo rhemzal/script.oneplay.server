@@ -2,7 +2,7 @@
 import os
 
 from urllib.parse import quote, unquote
-from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, TEMPLATE_PATH
+from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, TEMPLATE_PATH, abort
 import json
 import base64
 import hmac
@@ -12,6 +12,7 @@ from resources.lib.session import load_session
 from resources.lib.channels import load_channels, load_diasbled_channels, save_disabled_channels
 from resources.lib.epg import get_epg, load_epg, get_live_epg, get_channel_epg
 from resources.lib.stream import get_live, get_archive
+from resources.lib.helpers import is_truthy, resolve_channel_name_by_number
 from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist
 
 def get_base_url(include_auth = False):
@@ -179,12 +180,14 @@ def play(channel):
 
 @route('/play_num/<channel>')
 def play_num(channel):
-    channels = load_channels()
-    for chan in channels:
-        if channels[chan]['channel_number'] == int(channel.replace('.m3u8', '')):
-            channel_name = channels[chan]['name']
-    if get_config_value('odstranit_hd') == 1 or get_config_value('odstranit_hd') == '1' or get_config_value('odstranit_hd') == 'true':
-        channel_name = channel.replace(' HD', '')
+    channel_number = int(channel.replace('.m3u8', ''))
+    channel_name = resolve_channel_name_by_number(
+        load_channels(),
+        channel_number,
+        strip_hd=is_truthy(get_config_value('odstranit_hd')),
+    )
+    if channel_name is None:
+        abort(404, 'Kanál nenalezen')
     if 'start_ts' in request.query:
         stream = get_archive(channel_name, request.query['start_ts'], request.query['end_ts'])
     elif 'utc' in request.query:
@@ -260,7 +263,6 @@ def page():
             else:
                 channel_name = channels[channel]['name']
             playlist.append({'name' : channel_name, 'url' : base_url_with_auth + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8', 'slug' : quote(channel_name.replace('/', 'sleš')) + '.m3u8', 'logo' : channels[channel]['logo'], 'channel_id' : channel, 'liveOnly' : channels[channel].get('liveOnly', False), 'visible' : channels[channel]['visible']})
-            print(channels[channel]['visible'])
     TEMPLATE_PATH.append(os.path.join(get_script_path(), 'resources', 'templates'))
     auth_enabled = bool(get_config_value('auth_user') and get_config_value('auth_pass'))
     return template('form.tpl', version = get_version(), message = message, warning = warning, playlist_url = playlist_url, playlist_tvheadend_url = playlist_tvheadend_url, epg_url = epg_url, playlist = playlist, auth_enabled = auth_enabled, player_enabled = player_enabled)

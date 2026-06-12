@@ -1,0 +1,15 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+
+config.txt
+config.txt.*
+PR_BODY.md
+FORUM_POST.txt
+
+data/session.txt
+data/channels.txt
+data/epg.txt
+data/disabled_channels.txt

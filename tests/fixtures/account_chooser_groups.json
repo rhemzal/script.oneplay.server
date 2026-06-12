@@ -1,0 +1,17 @@
+{
+  "schema": "ShowAccountChooserStep",
+  "authToken": "auth-token-example",
+  "groups": [
+    {
+      "accounts": [
+        {"accountId": "acc-1", "extId": "svc-a", "isActive": true},
+        {"accountId": "acc-2", "extId": "svc-b", "isActive": true}
+      ]
+    },
+    {
+      "accounts": [
+        {"accountId": "acc-3", "extId": "svc-c", "isActive": false}
+      ]
+    }
+  ]
+}

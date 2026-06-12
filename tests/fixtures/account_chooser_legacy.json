@@ -1,0 +1,8 @@
+{
+  "schema": "ShowAccountChooserStep",
+  "authToken": "auth-token-example",
+  "accounts": [
+    {"accountId": "legacy-1", "extId": "svc-1", "isActive": true},
+    {"accountId": "legacy-2", "extId": "svc-2", "isActive": true}
+  ]
+}

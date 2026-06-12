@@ -5,6 +5,7 @@ import json
 import time
 
 from resources.lib.api import call_api
+from resources.lib.helpers import collect_account_ids, select_account_id
 from resources.lib.utils import get_config_value, display_message, load_json_data, save_json_data, api_version
 
 def get_token():
@@ -14,25 +15,12 @@ def get_token():
         display_message('Problém při přihlášení')
         sys.exit()
     if data['step']['schema'] == 'ShowAccountChooserStep':
-        accounts = []
         authToken = data['step']['authToken']
-        for account in data['step']['accounts']:
-            accounts.append(account['accountId'])
-
-        if get_config_value('poradi_sluzby') is None:
-            account_index = -1
-        else:
-            account_index = int(get_config_value('poradi_sluzby'))
-            if account_index > len(accounts):
-                account_index = -1
-        idx = 1
-        accountId = ''
-        for account in accounts:
-            if account_index > 0 and idx == account_index:
-                accountId = account
-            elif account_index == -1:
-                accountId = account
-            idx = idx + 1
+        accounts = collect_account_ids(data['step'])
+        if not accounts:
+            display_message('Problém při přihlášení - žádné dostupné účty')
+            sys.exit()
+        accountId = select_account_id(accounts, get_config_value('poradi_sluzby'))
         post = {"payload":{"command":{"schema":"LoginWithAccountCommand","accountId":accountId,"authCode":authToken}}}
         data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/user.login.step', data = post)   
         if 'err' in data or 'step' not in data or 'bearerToken' not in data['step']:
