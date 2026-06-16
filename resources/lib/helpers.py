@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 
 NO_ACCESS_URL = 'http://sledovanietv.sk/download/noAccess-cs.m3u8'
 
@@ -97,6 +99,35 @@ def extract_hls_url(data, fallback=NO_ACCESS_URL):
         if url == fallback:
             url = src
     return url
+
+
+def resolve_hls_manifest(stream_url, user_agent=None):
+    if not stream_url or stream_url == NO_ACCESS_URL:
+        return None
+    headers = {
+        'User-Agent': user_agent or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0',
+        'Accept': '*/*',
+    }
+    try:
+        resp = urlopen(Request(stream_url, headers=headers), timeout=20)
+        final_url = resp.geturl()
+        base = final_url.rsplit('/', 1)[0] + '/'
+        body = resp.read().decode('utf-8', errors='replace')
+    except Exception:
+        return None
+    lines = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            lines.append(line)
+            continue
+        if stripped.startswith('http://') or stripped.startswith('https://'):
+            lines.append(line)
+        else:
+            lines.append(urljoin(base, stripped))
+    if body.endswith('\n'):
+        return '\n'.join(lines) + '\n'
+    return '\n'.join(lines)
 
 
 def parse_epg_item_action(item):

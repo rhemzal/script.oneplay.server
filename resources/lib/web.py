@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
+import socketserver
+from wsgiref.simple_server import WSGIServer
 
 from urllib.parse import quote, unquote
 from bottle import run, route, post, response, request, redirect, template, static_file, hook, HTTPResponse, HTTPError, TEMPLATE_PATH, install, abort, default_app
@@ -15,6 +17,33 @@ from resources.lib.epg import get_epg, load_epg, get_live_epg, get_channel_epg
 from resources.lib.stream import get_live, get_archive
 from resources.lib.helpers import is_truthy, resolve_channel_name_by_number
 from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist, OneplayError, log_error, is_debug
+
+
+class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def _tvheadend_ffmpeg_path():
+    ffmpeg = get_config_value('cesta_ffmpeg')
+    if ffmpeg is None or len(ffmpeg) == 0:
+        return '/usr/bin/ffmpeg'
+    return ffmpeg
+
+
+def _tvheadend_ffmpeg_input_flags():
+    return '-loglevel error -fflags +genpts'
+
+
+def _tvheadend_ffmpeg_pipe(play_url, channel_name):
+    # TVHeadend pipe:// neumí spolehlivě uvozovky; název kanálu jen v EXTINF.
+    return (
+        'pipe://' + _tvheadend_ffmpeg_path() + ' '
+        + _tvheadend_ffmpeg_input_flags()
+        + ' -i ' + play_url
+        + ' -f mpegts -c copy -vcodec copy -acodec copy'
+        + ' -metadata service_provider=Oneplay pipe:1'
+    )
 
 
 class OneplayErrorPlugin:
@@ -150,9 +179,6 @@ def playlist_tvheadend():
     strip_hd = is_truthy(get_config_value('odstranit_hd'))
     use_numbers = is_truthy(get_config_value('pouzivat_cisla_kanalu'))
     output = '#EXTM3U x-tvg-url="' + base_url + '/epg"\n'
-    ffmpeg = get_config_value('cesta_ffmpeg')
-    if ffmpeg == None or len(ffmpeg) == 0:
-        ffmpeg = '/usr/bin/ffmpeg'
     for channel in channels:
         if channels[channel]['visible'] == True:
             logo = channels[channel]['logo'] or ''
@@ -161,9 +187,10 @@ def playlist_tvheadend():
                 channel_name = channels[channel]['name']
             output += '#EXTINF:-1 provider="Oneplay" tvg-chno="' + str(channels[channel]['channel_number']) + '" tvg-name="' + channel_name + '" tvg-logo="' + logo + '", ' + channel_name + '\n'
             if not use_numbers:
-                output += 'pipe://' + ffmpeg + ' -loglevel error -fflags +genpts -i "' + base_url + '/play/' + quote(channel_name.replace('/', 'sleš')) + '.m3u8" -f mpegts -c copy -vcodec copy -acodec copy -metadata service_provider=Oneplay -metadata service_name="' + channel_name + '" pipe:1\n'
+                play_url = base_url + '/play/' + quote(channel_name.replace('/', 'sleš')) + '.m3u8'
             else:
-                output += 'pipe://' + ffmpeg + ' -loglevel error -fflags +genpts -i "' + base_url + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8" -f mpegts -c copy -vcodec copy -acodec copy -metadata service_provider=Oneplay -metadata service_name="' + channel_name + '" pipe:1\n'
+                play_url = base_url + '/play_num/' + str(channels[channel]['channel_number']) + '.m3u8'
+            output += _tvheadend_ffmpeg_pipe(play_url, channel_name) + '\n'
     response.content_type = 'text/plain; charset=UTF-8'
     return output
 
@@ -197,7 +224,7 @@ def play(channel):
         stream = get_archive(channel, request.query['utc'], request.query['lutc'])
     else:
         stream = get_live(channel)
-    response.content_type = 'application/x-mpegURL'
+    response.content_type = 'application/vnd.apple.mpegurl'
     return redirect(stream)
 
 @route('/play_num/<channel>')
@@ -216,7 +243,7 @@ def play_num(channel):
         stream = get_archive(channel_name, request.query['utc'], request.query['lutc'])
     else:
         stream = get_live(channel_name)
-    response.content_type = 'application/x-mpegURL'
+    response.content_type = 'application/vnd.apple.mpegurl'
     return redirect(stream)
 
 @route('/img/<image>')
@@ -306,4 +333,4 @@ def _ensure_error_plugin():
 def start_server():
     _ensure_error_plugin()
     port = int(get_config_value('webserver_port'))
-    run(host = '0.0.0.0', port = port, debug = False)
+    run(host = '0.0.0.0', port = port, debug = False, server_class = ThreadedWSGIServer)
