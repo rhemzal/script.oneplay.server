@@ -34,7 +34,7 @@ např. http://127.0.0.1:8082/playlist/tvheadend
 
 Playlist vrací řádky <code>pipe://</code> s ffmpeg, který stahuje HLS z endpointu <code>/play/</code> a převádí ho na MPEG-TS pro TVHeadend. OnePlay server musí být z TVH dosažitelný na portu z config.txt (typicky 8082); pokud běží na stejném stroji jako TVH, stačí <code>127.0.0.1</code>.
 
-Doporučené nastavení sítě v TVH: dostatečný počet IPTV adaptérů (např. 12), <code>max_timeout</code> 60 s. Po <b>Force scan</b> sítě spusťte opravu mapování kanálů (viz sekce Skripty).
+Počet IPTV adaptérů a <code>max_streams</code> v TVH nastavte podle limitu souběžných streamů vaší OnePlay licence – běžný účet povoluje typicky <b>3</b> streamy najednou; vyšší počty (např. u korporátní licence) jsou výjimka a je nutné je sladit s limitem od operátora. Doporučujeme také <code>max_timeout</code> 60 s. Po <b>Force scan</b> sítě spusťte opravu mapování kanálů (viz sekce Skripty).
 
 U EPG je jednou z variant využití External XMLTV grabberu. Nejprve ho je potřeba v TVheadendu povolit (Program/Channels - EPG Grabber modules). V adresáři scripts je připravený skript epg.sh, který stáhne EPG z Oneplay Server a obsah pošle External XMLTV grabberu. Zkontrolujte v něm cestu xmltv.sock (vytvoří se po povolení grabberu) a URL Oneplay Serveru.
 
