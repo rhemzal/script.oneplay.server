@@ -1,7 +1,12 @@
-v1.5.5 (12.6.2026)
+v1.5.5 (12.6.2026) – develop
 - oprava loginu pro nové OnePlay API (step.groups[].accounts)
 - srozumitelnější logování chyb místo Python tracebacku
 - ochrana proti opakovaným login pokusům (rate limit API)
+- vícevláknový web server (nezablokuje streamy při generování EPG)
+- playlist TVHeadend přes pipe://ffmpeg a redirect v /play/
+- skript fix_tvh_channel_services.sh pro opravu mapování kanálů po TVH rescanu
+- testovací skripty test_nova_hd.sh, test_tvheadend_pipe.sh
+- pytest suite pro login a helpers
 
 v1.5.4 (11.6.2026)
 - úprava verze API a aplikace
@@ -22,4 +27,3 @@ v1.5.1 (18.4.2026)
 
 v1.5.0 (11.4.2026)
 - nová webová stránka (od sedin2)
-
