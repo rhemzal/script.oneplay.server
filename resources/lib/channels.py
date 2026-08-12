@@ -84,6 +84,21 @@ def save_channels(channels):
     data = json.dumps({'channels' : channels, 'valid_to' : valid_to})
     save_json_data({'filename' : 'channels.txt', 'description' : 'kanálů'}, data)
 
+
+def read_channels_cache():
+    data = load_json_data({'filename' : 'channels.txt', 'description' : 'kanálů'})
+    if data is None:
+        return None, 0
+    try:
+        parsed = json.loads(data)
+        channels = parsed.get('channels')
+        valid_to = int(parsed.get('valid_to', 0))
+        if not channels or valid_to < int(time.time()):
+            return None, 0
+        return channels, len(channels)
+    except (TypeError, ValueError, KeyError):
+        return None, 0
+
 def load_diasbled_channels():
     disabled_channels = []
     data = load_json_data({'filename' : 'disabled_channels.txt', 'description' : 'zakázaných kanálů'})

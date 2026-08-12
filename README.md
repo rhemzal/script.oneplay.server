@@ -84,6 +84,15 @@ Playlist s jednou skupinou (atribut <code>group-title</code> v M3U): http://127.
 
 EPG lze pak stáhnout z http://<adresa nebo jméno serveru>:<port (defaultně 8082)>/epg, např. http://127.0.0.1:8082/epg
 
+Health check (monitoring): http://127.0.0.1:8082/health – JSON s poli <code>status</code> (<code>ok</code> / <code>degraded</code> / <code>error</code>), <code>version</code>, <code>api_version</code>, <code>session_cached</code>, <code>channels_cached</code>, <code>login_backoff</code> (sekundy do dalšího login pokusu). Endpoint nevolá login – čte jen cache ze souborů.
+
+V <code>config.txt</code> lze nastavit cache živých stream URL (snížení zátěže API při TVH scanu):
+<ul>
+<li><code>stream_cache_ttl</code> – TTL v sekundách (default 45)</li>
+<li><code>stream_cache_enabled</code> – 1 zapnuto, 0 vypnuto (default 1)</li>
+</ul>
+Cache se vyčistí při „Session reset“ na webu.
+
 Na http://<adresa nebo jméno serveru>:<port (defaultně 8082)>, např. http://127.0.0.1:8082 je možné stiskem tlačítka vynutit načtení kanálů nebo vytvoření nové sessiony.
 
 <b><u>Vývoj (větev develop)</u></b>
@@ -108,6 +117,11 @@ Oproti upstream tagu <b>1.5.5</b> (waladir obsahuje jen opravu načítání úč
 <pre>python3 -m pytest</pre>
 
 <b><u>Změny</u></b>
+v1.5.7 (12.8.2026) – develop
+- health endpoint /health pro monitoring
+- cache živých stream URL (stream_cache_ttl, stream_cache_enabled)
+- oprava uložení disable kanálů (upstream fix)
+
 v1.5.6 (12.8.2026) – develop
 - oprava výběru hls-clear streamu pro TVHeadend (místo hls-aes)
 - TVHeadend pipe:// s user_agent OnePlayServer (CDN 403 bez UA)

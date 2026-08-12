@@ -1,4 +1,4 @@
-﻿<addon id="script.oneplay.server" name="Oneplay Server" provider-name="waladir" version="1.5.6">
+﻿<addon id="script.oneplay.server" name="Oneplay Server" provider-name="waladir" version="1.5.7">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.bottle"/>
@@ -15,6 +15,11 @@ Playlist: http://&lt;server&gt;:&lt;port&gt;/playlist
     <platform>all</platform>
     <source>https://github.com/waladir/script.oneplay.server</source>
     <news>
+v1.5.7 (12.8.2026)
+- health endpoint /health pro monitoring
+- cache živých stream URL (stream_cache_ttl, snížení zátěže API při TVH scanu)
+- oprava uložení disable kanálů (save vždy po změně)
+
 v1.5.6 (12.8.2026)
 - oprava výběru hls-clear streamu pro TVHeadend (místo hls-aes)
 - TVHeadend pipe:// s user_agent OnePlayServer (CDN 403 bez UA)

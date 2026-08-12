@@ -1,3 +1,8 @@
+v1.5.7 (12.8.2026) – develop
+- health endpoint /health (JSON status pro monitoring)
+- cache živých stream URL (stream_cache_ttl, stream_cache_enabled)
+- oprava uložení disable kanálů (upstream fix)
+
 v1.5.6 (12.8.2026) – develop
 - oprava výběru hls-clear streamu pro TVHeadend (místo hls-aes)
 - TVHeadend pipe:// s user_agent OnePlayServer (CDN 403 bez UA)

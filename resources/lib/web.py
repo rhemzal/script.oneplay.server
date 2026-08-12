@@ -11,10 +11,12 @@ import base64
 import hmac
 
 
-from resources.lib.session import load_session
-from resources.lib.channels import load_channels, load_diasbled_channels, save_disabled_channels
+from resources.lib.session import load_session, is_session_cached, get_login_backoff_seconds
+from resources.lib.channels import load_channels, load_diasbled_channels, save_disabled_channels, read_channels_cache
 from resources.lib.epg import get_epg, load_epg, get_live_epg, get_channel_epg
 from resources.lib.stream import get_live, get_archive
+from resources.lib.stream_cache import clear as clear_stream_cache
+from resources.lib.api import load_api_version
 from resources.lib.helpers import is_truthy, resolve_channel_name_by_number
 from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist, OneplayError, log_error, is_debug, log_message
 
@@ -112,6 +114,36 @@ def check_basic_auth():
     err = HTTPResponse('Přístup odepřen', 401)
     err.set_header('WWW-Authenticate', 'Basic realm="Oneplay Server"')
     raise err
+
+@route('/health')
+def health():
+    try:
+        session_cached = is_session_cached()
+        _, channels_count = read_channels_cache()
+        login_backoff = get_login_backoff_seconds()
+        if login_backoff > 0:
+            status = 'degraded'
+        elif session_cached and channels_count > 0:
+            status = 'ok'
+        else:
+            status = 'degraded'
+        payload = {
+            'status': status,
+            'version': get_version(),
+            'api_version': load_api_version(),
+            'session_cached': session_cached,
+            'channels_cached': channels_count,
+            'login_backoff': login_backoff,
+        }
+    except Exception as e:
+        log_error('Health check', str(e))
+        response.status = 500
+        payload = {
+            'status': 'error',
+            'message': str(e),
+        }
+    response.content_type = 'application/json'
+    return json.dumps(payload)
 
 @route('/epg')
 def epg():
@@ -284,10 +316,9 @@ def channel(channel, status):
     disabled_channels = load_diasbled_channels()
     if status == 'disable' and channel not in disabled_channels:
         disabled_channels.append(channel)
-        save_disabled_channels(disabled_channels)
     elif status == 'enable' and channel in disabled_channels:
         disabled_channels.remove(channel)
-        save_disabled_channels(disabled_channels)
+    save_disabled_channels(disabled_channels)
 
 @route('/')
 @post('/')
@@ -302,6 +333,7 @@ def page():
             message = 'Kanály resetovány!'
         elif action == 'reset_session':
             load_session(reset = True)
+            clear_stream_cache()
             message = 'Sessiona resetována!'
     auth_enabled = bool(get_config_value('auth_user') and get_config_value('auth_pass'))
     player_enabled = auth_enabled or not warning

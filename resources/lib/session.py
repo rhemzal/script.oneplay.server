@@ -153,3 +153,15 @@ def load_session(reset = False):
 def save_session(token):
     data = json.dumps({'token' : token, 'valid_to' : int(time.time() + 60*60*4)})
     save_json_data({'filename' : 'session.txt', 'description' : 'session'}, data)
+
+
+def is_session_cached():
+    return _read_cached_token() is not None
+
+
+def get_login_backoff_seconds():
+    with _session_lock:
+        remaining = _login_failure_until - int(time.time())
+        if remaining > 0:
+            return remaining
+    return 0

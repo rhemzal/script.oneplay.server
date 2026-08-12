@@ -13,6 +13,7 @@ from resources.lib.helpers import (
     is_truthy,
     resolve_channel_internal_id,
 )
+from resources.lib.stream_cache import get_live_url, set_live_url, get_archive_url, set_archive_url
 from resources.lib.utils import get_config_value, is_debug, log_error
 
 PLAYBACK_CAPS = {
@@ -72,6 +73,10 @@ def get_live(channel_ref):
         log_error('Neznámý kanál', channel_ref)
         return NO_ACCESS_URL
 
+    cached_url = get_live_url(channel_ref)
+    if cached_url:
+        return cached_url
+
     if channels[channel_id]['adult']:
         post = {
             "authorization": [{"schema": "PinRequestAuthorization", "pin": _parental_pin(), "type": "parental"}],
@@ -117,6 +122,8 @@ def get_live(channel_ref):
     if url == NO_ACCESS_URL:
         detail = str(data) if is_debug() else None
         log_error('Nepodařilo se získat stream pro kanál ' + str(channel_ref), detail)
+    else:
+        set_live_url(channel_ref, url)
     return url
 
 
@@ -140,6 +147,10 @@ def get_archive(channel_name, start_ts, end_ts):
 
     if epg[start_ts]['endts'] > int(time.mktime(datetime.now().timetuple())) - 10:
         return get_live(channel_name)
+
+    cached_url = get_archive_url(channel_id, start_ts, end_ts)
+    if cached_url:
+        return cached_url
 
     if channels[channel_id]['adult']:
         deeplink = (epg[start_ts].get('payload') or {}).get('deeplink') or {}
@@ -178,4 +189,7 @@ def get_archive(channel_name, start_ts, end_ts):
         post = {"payload": payload, "playbackCapabilities": PLAYBACK_CAPS}
 
     data = call_api(url=api_url('content.play'), data=post, token=token)
-    return extract_hls_url(data)
+    url = extract_hls_url(data)
+    if url != NO_ACCESS_URL:
+        set_archive_url(channel_id, start_ts, end_ts, url)
+    return url
