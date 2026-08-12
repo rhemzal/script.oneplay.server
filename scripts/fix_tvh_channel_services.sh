@@ -26,7 +26,13 @@ for sub in channel/config input/iptv/networks; do
 	fi
 done
 
-sudo -u hts env TVH_CONF="$TVH_CONF" NETWORK="$NETWORK" python3 <<'PY'
+if [[ "$(id -u)" -eq 0 ]]; then
+	SUDO_PREFIX=(sudo -u hts)
+else
+	SUDO_PREFIX=()
+fi
+
+"${SUDO_PREFIX[@]}" env TVH_CONF="$TVH_CONF" NETWORK="$NETWORK" python3 <<'PY'
 import glob, gzip, re, json, os, sys
 from urllib.parse import unquote
 
@@ -142,4 +148,7 @@ if fixed == 0:
     print('Žádné změny nebyly potřeba.')
 PY
 
-echo "Hotovo. Doporučeno: sudo systemctl restart tvheadend"
+echo "Hotovo."
+if [[ "${TVH_AUTO_FIX:-}" != "1" ]]; then
+	echo "Doporučeno: sudo systemctl restart tvheadend"
+fi

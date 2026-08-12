@@ -26,7 +26,8 @@ V <code>config.txt</code> držte <code>debug</code> na <b>0</b> v produkci – p
 <li><code>sudo systemctl restart oneplay_server</code></li>
 <li>V TVHeadendu: Force scan IPTV sítě nebo reload playlistu</li>
 <li><code>sudo ./scripts/fix_tvh_channel_services.sh</code> – nebo <code>make tvh-fix</code></li>
-<li><code>sudo systemctl restart tvheadend</code> – nebo <code>make tvh-restart</code> (fix + restart + health)</li>
+<li><code>sudo systemctl restart tvheadend</code> – nebo <code>make tvh-restart</code> (ruční fix + restart + ověření)</li>
+<li>Po instalaci auto-fix (<code>make install-tvh-autofix</code>) fix po startu TVH proběhne automaticky</li>
 <li><code>bash scripts/test_nova_hd.sh</code> a <code>bash scripts/test_tvheadend_pipe.sh</code></li>
 </ol>
 
@@ -71,11 +72,15 @@ V adresáři <code>scripts/</code> jsou pomocné nástroje pro provoz s TVHeaden
 <code>sudo ./scripts/fix_tvh_channel_services.sh Oneplay1</code> – konkrétní síť (název nebo UUID)<br>
 <code>sudo env TVH_CONF=/home/hts/conf ./scripts/fix_tvh_channel_services.sh</code> – vlastní cesta ke konfiguraci TVH</li>
 <li><b>test_nova_hd.sh</b> – ověří, že OnePlay server vrací živý HLS stream (Nova HD)</li>
+<li><b>tvh_auto_fix.sh</b> – automatický fix mapování po startu TVHeadend (systemd ExecStartPost)<br>
+<code>sudo make install-tvh-autofix</code> – instalace drop-in do <code>tvheadend.service.d</code><br>
+Log: <code>journalctl -t oneplay-tvh-auto-fix</code></li>
+<li><b>verify_tvh_nova.sh</b> – ověří Nova HD přes TVH port 9981 s opakováním</li>
 <li><b>check_health.sh</b> – ověří <code>/health</code> s opakováním po restartu serveru</li>
-<li><b>Makefile</b> – <code>make tvh-restart</code>, <code>make verify</code>, <code>make verify-tvh</code> (viz <code>make help</code>)</li>
+<li><b>Makefile</b> – <code>make install-tvh-autofix</code>, <code>make tvh-restart</code>, <code>make verify</code>, <code>make verify-tvh</code> (viz <code>make help</code>)</li>
 </ul>
 
-Po opravě mapování kanálů doporučujeme: <code>sudo systemctl restart tvheadend</code>
+Po opravě mapování kanálů doporučujeme restart TVH; s auto-fix instalací se mapování opraví samo po každém startu TVHeadend.
 
 <b><u>URL</u></b>
 
@@ -118,6 +123,10 @@ Oproti upstream tagu <b>1.5.5</b> (waladir obsahuje jen opravu načítání úč
 <pre>python3 -m pytest</pre>
 
 <b><u>Změny</u></b>
+v1.5.8 (12.8.2026) – develop
+- automatický tvh-fix po startu TVHeadend (systemd drop-in)
+- verify_tvh_nova.sh s opakováním, Makefile install-tvh-autofix
+
 v1.5.7 (12.8.2026) – develop
 - health endpoint /health pro monitoring
 - cache živých stream URL (stream_cache_ttl, stream_cache_enabled)

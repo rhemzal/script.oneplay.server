@@ -1,3 +1,7 @@
+v1.5.8 (12.8.2026) – develop
+- automatický tvh-fix po startu TVHeadend (systemd drop-in, make install-tvh-autofix)
+- verify_tvh_nova.sh s opakováním
+
 v1.5.7 (12.8.2026) – develop
 - health endpoint /health (JSON status pro monitoring)
 - cache živých stream URL (stream_cache_ttl, stream_cache_enabled)

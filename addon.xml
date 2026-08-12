@@ -1,4 +1,4 @@
-﻿<addon id="script.oneplay.server" name="Oneplay Server" provider-name="waladir" version="1.5.7">
+﻿<addon id="script.oneplay.server" name="Oneplay Server" provider-name="waladir" version="1.5.8">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.bottle"/>
@@ -15,6 +15,10 @@ Playlist: http://&lt;server&gt;:&lt;port&gt;/playlist
     <platform>all</platform>
     <source>https://github.com/waladir/script.oneplay.server</source>
     <news>
+v1.5.8 (12.8.2026)
+- automatický tvh-fix po startu TVHeadend (systemd drop-in)
+- verify_tvh_nova.sh s opakováním pro ověření streamu
+
 v1.5.7 (12.8.2026)
 - health endpoint /health pro monitoring
 - cache živých stream URL (stream_cache_ttl, snížení zátěže API při TVH scanu)
