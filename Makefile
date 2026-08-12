@@ -29,6 +29,7 @@ tvh-fix:
 	sudo env TVH_CONF=$(TVH_CONF) $(SCRIPTS)/fix_tvh_channel_services.sh Oneplay1
 	sudo env TVH_CONF=$(TVH_CONF) $(SCRIPTS)/fix_tvh_channel_services.sh
 
+# Po instalaci auto-fix (v1.5.8+) není nutný – auto-fix po restartu TVH dělá totéž
 tvh-restart: tvh-fix
 	sudo systemctl restart tvheadend
 	sleep 15

@@ -22,14 +22,50 @@ V <code>config.txt</code> držte <code>debug</code> na <b>0</b> v produkci – p
 
 <b><u>Checklist po deploy / změně playlistu</u></b>
 
+<b>S auto-fixem (doporučený provoz, v1.5.8+):</b> po jednorázové instalaci <code>make install-tvh-autofix</code> není po běžném restartu TVH nutný ruční fix.
+
 <ol>
-<li><code>sudo systemctl restart oneplay_server</code></li>
-<li>V TVHeadendu: Force scan IPTV sítě nebo reload playlistu</li>
-<li><code>sudo ./scripts/fix_tvh_channel_services.sh</code> – nebo <code>make tvh-fix</code></li>
-<li><code>sudo systemctl restart tvheadend</code> – nebo <code>make tvh-restart</code> (ruční fix + restart + ověření)</li>
-<li>Po instalaci auto-fix (<code>make install-tvh-autofix</code>) fix po startu TVH proběhne automaticky</li>
-<li><code>bash scripts/test_nova_hd.sh</code> a <code>bash scripts/test_tvheadend_pipe.sh</code></li>
+<li><code>sudo systemctl restart oneplay_server</code> – jen při změně configu nebo aktualizaci kódu</li>
+<li>V TVHeadendu: Force scan IPTV sítě nebo reload playlistu (při změně kanálů)</li>
+<li><code>sudo systemctl restart tvheadend</code> – auto-fix po startu sám opraví mapování a při potřebě TVH jednou znovu restartuje</li>
+<li>Ověření: <code>make verify-tvh</code> nebo <code>make health</code></li>
 </ol>
+
+<b>Ruční postup</b> (bez auto-fixu nebo při diagnostice): <code>make tvh-fix</code> → <code>sudo systemctl restart tvheadend</code> → <code>make verify-tvh</code>, případně vše v jednom <code>make tvh-restart</code>.
+
+<b><u>Provozní režim (produkce)</u></b>
+
+Na serveru xibo (větev <code>develop</code>, verze <b>1.5.8</b>) je nasazený automatický tvh-fix. <b>Služby mohou běžet bez dalších zásahů</b> – rutinně není potřeba ručně spouštět <code>make tvh-fix</code> ani <code>make tvh-restart</code>.
+
+<table>
+<tr><th>Služba</th><th>Stav</th><th>Poznámka</th></tr>
+<tr><td><code>oneplay_server</code></td><td>systemd</td><td>Playlist/EPG na 8082, <code>debug=0</code>, bez <code>ExecStartPre</code> mazání session</td></tr>
+<tr><td><code>tvheadend</code></td><td>systemd + drop-in</td><td><code>/etc/systemd/system/tvheadend.service.d/oneplay-tvh-fix.conf</code></td></tr>
+<tr><td>Auto tvh-fix</td><td>ExecStartPost</td><td>Čeká na mux (max 120 s), fix Oneplay1 + výchozí síť, restart TVH jen když <code>opraveno &gt; 0</code></td></tr>
+</table>
+
+<b>Co se děje po <code>systemctl restart tvheadend</code></b>
+<ul>
+<li>Mapování kanálů už OK → jeden start, v logu <code>opraveno: 0</code>, žádný další restart</li>
+<li>Mapování rozbité (prázdné <code>services</code>) → fix opraví kanály → <b>jeden</b> další restart TVH → konec (bez smyčky)</li>
+<li>První restart po Force scan může trvat ~30–60 s (mux parse + případný druhý start)</li>
+</ul>
+
+<b>Monitoring</b>
+<ul>
+<li><code>make health</code> – OnePlay <code>/health</code></li>
+<li><code>make verify-tvh</code> – Nova HD přes TVH 9981 (retry, očekáváno &gt;100 KB / 10 s)</li>
+<li><code>journalctl -t oneplay-tvh-auto-fix --since today</code> – log auto-fixu</li>
+<li><code>journalctl -u tvheadend --since "10 min ago"</code> – starty TVH (max 2 při rozbitém stavu)</li>
+</ul>
+
+<b>Kdy ještě ručně zasáhnout</b>
+<ul>
+<li>Aktualizace repozitáře – <code>git pull</code>, případně <code>sudo systemctl restart oneplay_server</code></li>
+<li>Změna drop-inu – znovu <code>make install-tvh-autofix</code> (aktualizuje cestu ke skriptu)</li>
+<li>Problémy se streamem – <code>make tvh-restart</code> jako nouzový full postup</li>
+<li>Opakované restarty TVH (&gt;2 za minutu) – zkontrolovat journal auto-fixu a TVH log</li>
+</ul>
 
 <b><u>TVheadend</u></b>
 
@@ -45,9 +81,9 @@ např. http://127.0.0.1:8082/playlist/tvheadend
 
 Playlist vrací řádky <code>pipe://</code> s ffmpeg, který stahuje HLS z endpointu <code>/play/</code> a převádí ho na MPEG-TS pro TVHeadend. OnePlay server musí být z TVH dosažitelný na portu z config.txt (typicky 8082); pokud běží na stejném stroji jako TVH, stačí <code>127.0.0.1</code>.
 
-<b>Stream do TVHeadendu (oprava v1.5.6):</b> OnePlay API vrací více HLS variant (<code>hls-clear</code>, <code>hls-aes</code>). Server musí vybrat nešifrovaný <code>hls-clear</code> a ffmpeg musí posílat User-Agent <code>OnePlayServer</code> – CDN vrací 403 pro výchozí UA ffmpeg. Po změně playlistu vždy spusťte <code>fix_tvh_channel_services.sh</code> (viz Skripty).
+<b>Stream do TVHeadendu (oprava v1.5.6):</b> OnePlay API vrací více HLS variant (<code>hls-clear</code>, <code>hls-aes</code>). Server musí vybrat nešifrovaný <code>hls-clear</code> a ffmpeg musí posílat User-Agent <code>OnePlayServer</code> – CDN vrací 403 pro výchozí UA ffmpeg. Mapování kanál → služba po rescanu/restartu TVH se od v1.5.8 opravuje automaticky (viz Provozní režim); ručně lze použít <code>make tvh-fix</code>.
 
-Počet IPTV adaptérů a <code>max_streams</code> v TVH nastavte podle limitu souběžných streamů vaší OnePlay licence – běžný účet povoluje typicky <b>3</b> streamy najednou; vyšší počty (např. u korporátní licence) jsou výjimka a je nutné je sladit s limitem od operátora. Doporučujeme také <code>max_timeout</code> 60 s. Po <b>Force scan</b> sítě spusťte opravu mapování kanálů (viz sekce Skripty).
+Počet IPTV adaptérů a <code>max_streams</code> v TVH nastavte podle limitu souběžných streamů vaší OnePlay licence – běžný účet povoluje typicky <b>3</b> streamy najednou; vyšší počty (např. u korporátní licence) jsou výjimka a je nutné je sladit s limitem od operátora. Doporučujeme také <code>max_timeout</code> 60 s. Po <b>Force scan</b> stačí restart TVH (auto-fix doplní mapování).
 
 U EPG je jednou z variant využití External XMLTV grabberu. Nejprve ho je potřeba v TVheadendu povolit (Program/Channels - EPG Grabber modules). V adresáři scripts je připravený skript epg.sh, který stáhne EPG z Oneplay Server a obsah pošle External XMLTV grabberu. Zkontrolujte v něm cestu xmltv.sock (vytvoří se po povolení grabberu) a URL Oneplay Serveru.
 
@@ -73,14 +109,16 @@ V adresáři <code>scripts/</code> jsou pomocné nástroje pro provoz s TVHeaden
 <code>sudo env TVH_CONF=/home/hts/conf ./scripts/fix_tvh_channel_services.sh</code> – vlastní cesta ke konfiguraci TVH</li>
 <li><b>test_nova_hd.sh</b> – ověří, že OnePlay server vrací živý HLS stream (Nova HD)</li>
 <li><b>tvh_auto_fix.sh</b> – automatický fix mapování po startu TVHeadend (systemd ExecStartPost)<br>
-<code>sudo make install-tvh-autofix</code> – instalace drop-in do <code>tvheadend.service.d</code><br>
-Log: <code>journalctl -t oneplay-tvh-auto-fix</code></li>
+<code>sudo make install-tvh-autofix</code> – jednorázová instalace drop-in do <code>tvheadend.service.d</code><br>
+Log: <code>journalctl -t oneplay-tvh-auto-fix</code><br>
+Env: <code>TVH_CONF</code>, <code>TVH_AUTO_FIX_POLL_MAX</code> (default 120), <code>TVH_AUTO_FIX_POLL_INTERVAL</code> (default 5)</li>
+<li><b>install_tvheadend_auto_fix.sh</b> – instalátor drop-inu (voláno z Makefile)</li>
 <li><b>verify_tvh_nova.sh</b> – ověří Nova HD přes TVH port 9981 s opakováním</li>
 <li><b>check_health.sh</b> – ověří <code>/health</code> s opakováním po restartu serveru</li>
 <li><b>Makefile</b> – <code>make install-tvh-autofix</code>, <code>make tvh-restart</code>, <code>make verify</code>, <code>make verify-tvh</code> (viz <code>make help</code>)</li>
 </ul>
 
-Po opravě mapování kanálů doporučujeme restart TVH; s auto-fix instalací se mapování opraví samo po každém startu TVHeadend.
+Po opravě mapování kanálů je potřeba restart TVH; s nainstalovaným auto-fixem to proběhne automaticky po každém startu služby <code>tvheadend</code>.
 
 <b><u>URL</u></b>
 
