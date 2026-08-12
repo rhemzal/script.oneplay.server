@@ -1,4 +1,4 @@
-﻿<addon id="script.oneplay.server" name="Oneplay Server" provider-name="waladir" version="1.5.5">
+﻿<addon id="script.oneplay.server" name="Oneplay Server" provider-name="waladir" version="1.5.6">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.bottle"/>
@@ -15,6 +15,14 @@ Playlist: http://&lt;server&gt;:&lt;port&gt;/playlist
     <platform>all</platform>
     <source>https://github.com/waladir/script.oneplay.server</source>
     <news>
+v1.5.6 (12.8.2026)
+- oprava výběru hls-clear streamu pro TVHeadend (místo hls-aes)
+- TVHeadend pipe:// s user_agent OnePlayServer (CDN 403 bez UA)
+- automatická detekce verze OnePlay API
+- playlist se skupinou kanálů (/playlist/group/&lt;name&gt;)
+- zjednodušený ffmpeg příkaz v TVHeadend playlistu
+- vylepšený test_tvheadend_pipe.sh
+
 v1.5.5 (12.6.2026)
 - oprava loginu pro nové OnePlay API (step.groups[].accounts)
 - srozumitelnější logování chyb místo Python tracebacku

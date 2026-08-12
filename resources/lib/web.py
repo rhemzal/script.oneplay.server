@@ -16,7 +16,7 @@ from resources.lib.channels import load_channels, load_diasbled_channels, save_d
 from resources.lib.epg import get_epg, load_epg, get_live_epg, get_channel_epg
 from resources.lib.stream import get_live, get_archive
 from resources.lib.helpers import is_truthy, resolve_channel_name_by_number
-from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist, OneplayError, log_error, is_debug
+from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist, OneplayError, log_error, is_debug, log_message
 
 
 class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
@@ -31,18 +31,26 @@ def _tvheadend_ffmpeg_path():
     return ffmpeg
 
 
+def _tvheadend_ffmpeg_user_agent():
+    # Bez mezer – TVHeadend pipe:// nepoužívá uvozovky; argumenty se dělí podle mezer.
+    return 'OnePlayServer'
+
+
 def _tvheadend_ffmpeg_input_flags():
-    return '-loglevel error -fflags +genpts'
+    # CDN odmítá výchozí ffmpeg User-Agent (403); TVHeadend pipe:// nepoužívá uvozovky.
+    return (
+        '-loglevel error -fflags +genpts '
+        + '-user_agent ' + _tvheadend_ffmpeg_user_agent()
+    )
 
 
 def _tvheadend_ffmpeg_pipe(play_url, channel_name):
-    # TVHeadend pipe:// neumí spolehlivě uvozovky; název kanálu jen v EXTINF.
+    # TVHeadend pipe:// neumí uvozovky; držet minimum argumentů (bez -metadata, bez duplicit -c).
     return (
         'pipe://' + _tvheadend_ffmpeg_path() + ' '
         + _tvheadend_ffmpeg_input_flags()
         + ' -i ' + play_url
-        + ' -f mpegts -c copy -vcodec copy -acodec copy'
-        + ' -metadata service_provider=Oneplay pipe:1'
+        + ' -f mpegts -c copy pipe:1'
     )
 
 
@@ -148,7 +156,8 @@ def epg_channel(channel_id, day_offset):
     return json.dumps(result)
 
 @route('/playlist')
-def playlist():
+@route('/playlist/group/<group_name>')
+def playlist(group_name=None):
     from urllib.parse import urlencode
     headers = {'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0', 'Accept-Encoding' : 'gzip, deflate, br, zstd', 'Accept' : '*/*'}
     channels = load_channels()
@@ -156,13 +165,14 @@ def playlist():
     strip_hd = is_truthy(get_config_value('odstranit_hd'))
     use_numbers = is_truthy(get_config_value('pouzivat_cisla_kanalu'))
     output = '#EXTM3U x-tvg-url="' + base_url + '/epg"\n'
+    group_string = ' group-title="' + group_name + '"' if group_name else ''
     for channel in channels:
         if channels[channel]['visible'] == True:
             logo = channels[channel]['logo'] or ''
             channel_name = resolve_channel_name_by_number(channels, channels[channel]['channel_number'], strip_hd=strip_hd)
             if channel_name is None:
                 channel_name = channels[channel]['name']
-            output += '#EXTINF:-1 provider="Oneplay" tvg-chno="' + str(channels[channel]['channel_number']) + '" tvg-name="' + channel_name + '" tvg-logo="' + logo + '" catchup-days="7" catchup="shift", ' + channel_name + '\n'
+            output += '#EXTINF:-1 provider="Oneplay" tvg-chno="' + str(channels[channel]['channel_number']) + '" tvg-name="' + channel_name + '" tvg-logo="' + logo + '"' + group_string + ' catchup-days="7" catchup="shift", ' + channel_name + '\n'
             output += '#KODIPROP:inputstream.adaptive.stream_headers=' + urlencode(headers) + '\n'
             output += '#KODIPROP:inputstream.adaptive.manifest_headers=' + urlencode(headers) + '\n'
             if not use_numbers:
@@ -332,5 +342,7 @@ def _ensure_error_plugin():
 
 def start_server():
     _ensure_error_plugin()
+    if is_debug():
+        log_message('VAROVÁNÍ: debug je zapnutý – velké logy API, pomalý provoz při TVH scanu. V produkci nastavte debug=0 v config.txt.')
     port = int(get_config_value('webserver_port'))
     run(host = '0.0.0.0', port = port, debug = False, server_class = ThreadedWSGIServer)

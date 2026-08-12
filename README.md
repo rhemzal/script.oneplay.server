@@ -14,11 +14,21 @@ Oneplay Server pro své fungování vyžaduje python moduly bottle a websocket. 
 
 Rozbalte zip, zkopírujte config.txt.sample na config.txt a v něm vyplňte jméno, heslo, deviceid a IP adresu nebo jméno serveru. Server spusťte z adresáře service.oneplay.server spuštěním python3 server.py.<br>
 Pokud chcete Oneplay Server spustit na linuxu se systemd jako službu, jako root/přes sudo:
-- zkopírujte z adresáře scripts soubor oneplay_server.service do /etc/systemd/system/
-- systemctl daemon-reload
-- systemctl enable oneplay_server
-- systemctl start oneplay_server
+- upravte a zkopírujte <code>scripts/oneplay_server.service</code> do <code>/etc/systemd/system/oneplay_server.service</code> (cesty User, venv, WorkingDirectory)
+- <b>ne</b> používejte <code>ExecStartPre</code> s mazáním <code>session.txt</code> / <code>channels.txt</code> – po každém restartu služby to způsobí nový login a při TVH scanu nestabilní start
+- <code>systemctl daemon-reload && systemctl enable oneplay_server && systemctl start oneplay_server</code>
 
+V <code>config.txt</code> držte <code>debug</code> na <b>0</b> v produkci – při <code>debug=1</code> se do journalu logují celé JSON odpovědi API a server se při TVH scanu výrazně zpomalí.
+
+<b><u>Checklist po deploy / změně playlistu</u></b>
+
+<ol>
+<li><code>sudo systemctl restart oneplay_server</code></li>
+<li>V TVHeadendu: Force scan IPTV sítě nebo reload playlistu</li>
+<li><code>sudo ./scripts/fix_tvh_channel_services.sh</code></li>
+<li><code>sudo systemctl restart tvheadend</code></li>
+<li><code>bash scripts/test_nova_hd.sh</code> a <code>bash scripts/test_tvheadend_pipe.sh</code></li>
+</ol>
 
 <b><u>TVheadend</u></b>
 
@@ -33,6 +43,8 @@ http://&lt;adresa nebo jméno serveru&gt;:&lt;port (defaultně 8082)&gt;/playlis
 např. http://127.0.0.1:8082/playlist/tvheadend
 
 Playlist vrací řádky <code>pipe://</code> s ffmpeg, který stahuje HLS z endpointu <code>/play/</code> a převádí ho na MPEG-TS pro TVHeadend. OnePlay server musí být z TVH dosažitelný na portu z config.txt (typicky 8082); pokud běží na stejném stroji jako TVH, stačí <code>127.0.0.1</code>.
+
+<b>Stream do TVHeadendu (oprava v1.5.6):</b> OnePlay API vrací více HLS variant (<code>hls-clear</code>, <code>hls-aes</code>). Server musí vybrat nešifrovaný <code>hls-clear</code> a ffmpeg musí posílat User-Agent <code>OnePlayServer</code> – CDN vrací 403 pro výchozí UA ffmpeg. Po změně playlistu vždy spusťte <code>fix_tvh_channel_services.sh</code> (viz Skripty).
 
 Počet IPTV adaptérů a <code>max_streams</code> v TVH nastavte podle limitu souběžných streamů vaší OnePlay licence – běžný účet povoluje typicky <b>3</b> streamy najednou; vyšší počty (např. u korporátní licence) jsou výjimka a je nutné je sladit s limitem od operátora. Doporučujeme také <code>max_timeout</code> 60 s. Po <b>Force scan</b> sítě spusťte opravu mapování kanálů (viz sekce Skripty).
 
@@ -68,6 +80,8 @@ Po opravě mapování kanálů doporučujeme: <code>sudo systemctl restart tvhea
 
 Playlist je dustupný na http://<adresa nebo jméno serveru>:<port (defaultně 8082)>/playlist, např. http://127.0.0.1:8082/playlist
 
+Playlist s jednou skupinou (atribut <code>group-title</code> v M3U): http://127.0.0.1:8082/playlist/group/NázevSkupiny
+
 EPG lze pak stáhnout z http://<adresa nebo jméno serveru>:<port (defaultně 8082)>/epg, např. http://127.0.0.1:8082/epg
 
 Na http://<adresa nebo jméno serveru>:<port (defaultně 8082)>, např. http://127.0.0.1:8082 je možné stiskem tlačítka vynutit načtení kanálů nebo vytvoření nové sessiony.
@@ -94,6 +108,14 @@ Oproti upstream tagu <b>1.5.5</b> (waladir obsahuje jen opravu načítání úč
 <pre>python3 -m pytest</pre>
 
 <b><u>Změny</u></b>
+v1.5.6 (12.8.2026) – develop
+- oprava výběru hls-clear streamu pro TVHeadend (místo hls-aes)
+- TVHeadend pipe:// s user_agent OnePlayServer (CDN 403 bez UA)
+- automatická detekce verze OnePlay API
+- playlist se skupinou kanálů (/playlist/group/&lt;name&gt;)
+- zjednodušený ffmpeg příkaz v TVHeadend playlistu
+- vylepšený test_tvheadend_pipe.sh
+
 v1.5.5 (12.6.2026) – develop
 - oprava loginu pro nové OnePlay API (step.groups[].accounts)
 - srozumitelnější logování chyb místo Python tracebacku

@@ -15,6 +15,7 @@ data/session.txt
 data/channels.txt
 data/epg.txt
 data/disabled_channels.txt
+data/api_version.txt
 
 # lokální poznámky k PR / fóru
 PR_BODY.md

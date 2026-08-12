@@ -141,6 +141,24 @@ def test_extract_hls_url():
     assert extract_hls_url(data) == 'http://example/live.m3u8'
     assert extract_hls_url({}) == NO_ACCESS_URL
 
+    oneplay_assets = {
+        'media': {
+            'stream': {
+                'assets': [
+                    {
+                        'protocol': 'hls',
+                        'src': 'https://cdn.tv.cetin.cz/live/2023/hls-clear/index.m3u8',
+                    },
+                    {
+                        'protocol': 'hls',
+                        'src': 'https://cdn.tv.cetin.cz/live/2023/hls-aes/index.m3u8',
+                    },
+                ]
+            }
+        }
+    }
+    assert extract_hls_url(oneplay_assets) == 'https://cdn.tv.cetin.cz/live/2023/hls-clear/index.m3u8'
+
 
 def test_parse_epg_item_action_show_deeplink():
     item = {

@@ -18,7 +18,6 @@ class OneplayError(Exception):
         self.detail = detail
 
 appVersion = 'R11.33'
-api_version = 'v1.11'
 
 def is_docker():
     # Check for Docker-specific environment variables

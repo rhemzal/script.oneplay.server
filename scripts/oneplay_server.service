@@ -3,10 +3,14 @@ Description=Oneplay Server
 After=network.target
 
 [Service]
-Type=idle
+Type=simple
 Restart=on-failure
-User=<uzivatel, pod kterym Oneplay Server ma bezet>
-ExecStart=/usr/bin/python3 <cesta k Oneplay Serveru>/script.oneplay.server/server.py
+User=hts
+Group=video
+WorkingDirectory=/usr/src/oneplay/script.oneplay.server
+ExecStart=/usr/src/oneplay/venv/bin/python /usr/src/oneplay/script.oneplay.server/server.py
+# Nepoužívat ExecStartPre s rm session.txt/channels.txt – po restartu způsobí cold login a zátěž API.
+# Session reset: webové rozhraní (Session reset) nebo ručně smazat data/session.txt.
 
 [Install]
 WantedBy=multi-user.target

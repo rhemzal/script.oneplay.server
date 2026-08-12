@@ -88,10 +88,11 @@ fi
 
 # 4) ffmpeg – krátký test příjmu dat (volitelný, pokud je ffmpeg)
 FFMPEG="${FFMPEG:-/usr/bin/ffmpeg}"
+FFMPEG_UA="${FFMPEG_UA:-OnePlayServer}"
 if [[ -x "${FFMPEG}" ]]; then
 	OUT="$(mktemp)"
 	trap 'rm -f "${PLAY_HDR}" "${PLAY_BODY}" "${OUT}"' EXIT
-	if "${FFMPEG}" -loglevel error -y -i "${BASE}/play/${CHANNEL_ENC}.m3u8" -t 5 -f null - 2>/dev/null; then
+	if "${FFMPEG}" -user_agent "${FFMPEG_UA}" -loglevel error -y -i "${BASE}/play/${CHANNEL_ENC}.m3u8" -t 5 -f null - 2>/dev/null; then
 		ok "ffmpeg přijal 5 s streamu"
 	else
 		fail "ffmpeg nedokázal přehrát 5 s streamu"

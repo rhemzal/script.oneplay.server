@@ -2,16 +2,16 @@
 import json
 import time
 
-from resources.lib.api import call_api
+from resources.lib.api import call_api, api_url
 from resources.lib.session import load_session
-from resources.lib.utils import load_json_data, save_json_data, raise_error, get_config_value, api_version
+from resources.lib.utils import load_json_data, save_json_data, raise_error, get_config_value
 
 def get_channels():
     md_channels = [{'name' : 'Oneplay Sport 1', 'count' : 8}, {'name' : 'Oneplay Sport 2', 'count' : 8}, {'name' : 'Oneplay Sport 3', 'count' : 4}, {'name' : 'Oneplay Sport 4', 'count' : 4}]
     channels = {}
     token = load_session()
 
-    data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/user.profiles.display', data = {"payload": {"mode": "change"}}, token = token)
+    data = call_api(url = api_url('user.profiles.display'), data = {"payload": {"mode": "change"}}, token = token)
     if 'err' in data or 'availableProfiles' not in data or 'profiles' not in data['availableProfiles']:
         raise_error('Problém při načtení profilů')
     profileId = None
@@ -24,7 +24,7 @@ def get_channels():
             profileId = profile['profile']['id']
 
     post = {"payload":{"profileId":str(profileId)}}
-    data = call_api(url = 'https://http.cms.jyxo.cz/api/' + api_version + '/epg.channels.display', data = post, token = token)
+    data = call_api(url = api_url('epg.channels.display'), data = post, token = token)
     if 'err' in data or 'channelList' not in data:
         raise_error('Problém při načtení kanálů')
     for channel in data['channelList']:

@@ -81,24 +81,44 @@ def get_api_error(data):
     return None
 
 
+def _is_aes_hls_url(url):
+    return 'hls-aes' in url or '/hls-aes/' in url
+
+
+def _is_clear_hls_url(url):
+    return 'hls-clear' in url or '/hls-clear/' in url
+
+
 def extract_hls_url(data, fallback=NO_ACCESS_URL):
     if not isinstance(data, dict):
         return fallback
     assets = data.get('media', {}).get('stream', {}).get('assets', [])
-    url = fallback
+    clear_url = None
+    other_url = None
+    aes_url = None
     for asset in assets:
         if asset.get('protocol') != 'hls':
             continue
         if asset.get('drm'):
             continue
         src = asset.get('src', '')
-        if not src:
+        if not src or 'noAccess' in src:
             continue
-        if 'clear' not in src and 'free' not in src:
-            return src
-        if url == fallback:
-            url = src
-    return url
+        if _is_clear_hls_url(src):
+            clear_url = src
+        elif _is_aes_hls_url(src):
+            aes_url = src
+        elif 'free' not in src:
+            other_url = src
+        elif other_url is None:
+            other_url = src
+    if clear_url:
+        return clear_url
+    if other_url:
+        return other_url
+    if aes_url:
+        return aes_url
+    return fallback
 
 
 def resolve_hls_manifest(stream_url, user_agent=None):

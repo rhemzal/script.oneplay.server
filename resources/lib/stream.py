@@ -5,7 +5,7 @@ from datetime import datetime
 from resources.lib.channels import load_channels
 from resources.lib.session import load_session
 from resources.lib.epg import get_channel_epg
-from resources.lib.api import call_api
+from resources.lib.api import call_api, api_url
 from resources.lib.helpers import (
     NO_ACCESS_URL,
     extract_hls_url,
@@ -13,7 +13,7 @@ from resources.lib.helpers import (
     is_truthy,
     resolve_channel_internal_id,
 )
-from resources.lib.utils import get_config_value, api_version, is_debug, log_error
+from resources.lib.utils import get_config_value, is_debug, log_error
 
 PLAYBACK_CAPS = {
     "protocols": ["dash", "hls"],
@@ -84,10 +84,10 @@ def get_live(channel_ref):
             "playbackCapabilities": PLAYBACK_CAPS,
         }
 
-    data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+    data = call_api(url=api_url('content.play'), data=post, token=token)
     if get_api_error(data):
         post['payload']['startMode'] = 'live'
-        data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+        data = call_api(url=api_url('content.play'), data=post, token=token)
 
     live_control = data.get('playerControl', {}).get('liveControl', {})
     if md and 'mosaic' in live_control:
@@ -102,7 +102,7 @@ def get_live(channel_ref):
                         "payload": {"criteria": {"schema": "MDPlaybackCriteria", "contentId": md_id, "position": 0}, "startMode": "start"},
                         "playbackCapabilities": PLAYBACK_CAPS,
                     }
-                    data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=md_post, token=token)
+                    data = call_api(url=api_url('content.play'), data=md_post, token=token)
                     if get_api_error(data) or 'media' not in data:
                         return NO_ACCESS_URL
             stream_number += 1
@@ -111,7 +111,7 @@ def get_live(channel_ref):
     time_shift = timeline.get('timeShift', {})
     if time_shift.get('available') is False:
         post.update({'payload': {'criteria': post['payload']['criteria'], 'startMode': 'live'}})
-        data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+        data = call_api(url=api_url('content.play'), data=post, token=token)
 
     url = extract_hls_url(data)
     if url == NO_ACCESS_URL:
@@ -162,7 +162,7 @@ def get_archive(channel_name, start_ts, end_ts):
     else:
         payload = None
         page_data = call_api(
-            url='https://http.cms.jyxo.cz/api/' + api_version + '/page.content.display',
+            url=api_url('page.content.display'),
             data={'payload': epg[start_ts].get('payload')},
             token=token,
         )
@@ -177,5 +177,5 @@ def get_archive(channel_name, start_ts, end_ts):
             return NO_ACCESS_URL
         post = {"payload": payload, "playbackCapabilities": PLAYBACK_CAPS}
 
-    data = call_api(url='https://http.cms.jyxo.cz/api/' + api_version + '/content.play', data=post, token=token)
+    data = call_api(url=api_url('content.play'), data=post, token=token)
     return extract_hls_url(data)
