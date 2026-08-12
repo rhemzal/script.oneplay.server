@@ -25,8 +25,8 @@ V <code>config.txt</code> držte <code>debug</code> na <b>0</b> v produkci – p
 <ol>
 <li><code>sudo systemctl restart oneplay_server</code></li>
 <li>V TVHeadendu: Force scan IPTV sítě nebo reload playlistu</li>
-<li><code>sudo ./scripts/fix_tvh_channel_services.sh</code></li>
-<li><code>sudo systemctl restart tvheadend</code></li>
+<li><code>sudo ./scripts/fix_tvh_channel_services.sh</code> – nebo <code>make tvh-fix</code></li>
+<li><code>sudo systemctl restart tvheadend</code> – nebo <code>make tvh-restart</code> (fix + restart + health)</li>
 <li><code>bash scripts/test_nova_hd.sh</code> a <code>bash scripts/test_tvheadend_pipe.sh</code></li>
 </ol>
 
@@ -71,7 +71,8 @@ V adresáři <code>scripts/</code> jsou pomocné nástroje pro provoz s TVHeaden
 <code>sudo ./scripts/fix_tvh_channel_services.sh Oneplay1</code> – konkrétní síť (název nebo UUID)<br>
 <code>sudo env TVH_CONF=/home/hts/conf ./scripts/fix_tvh_channel_services.sh</code> – vlastní cesta ke konfiguraci TVH</li>
 <li><b>test_nova_hd.sh</b> – ověří, že OnePlay server vrací živý HLS stream (Nova HD)</li>
-<li><b>test_tvheadend_pipe.sh</b> – ověří, že <code>pipe://</code> z playlistu produkuje MPEG-TS data</li>
+<li><b>check_health.sh</b> – ověří <code>/health</code> s opakováním po restartu serveru</li>
+<li><b>Makefile</b> – <code>make tvh-restart</code>, <code>make verify</code>, <code>make verify-tvh</code> (viz <code>make help</code>)</li>
 </ul>
 
 Po opravě mapování kanálů doporučujeme: <code>sudo systemctl restart tvheadend</code>
