@@ -41,11 +41,11 @@ def test_is_truthy(value, expected):
 
 
 @pytest.mark.parametrize('poradi_sluzby,expected', [
-    (None, 'acc-1'),
-    (-1, 'acc-1'),
-    (0, 'acc-1'),
-    (99, 'acc-1'),
-    ('invalid', 'acc-1'),
+    (None, 'acc-3'),
+    (-1, 'acc-3'),
+    (0, 'acc-3'),
+    (99, 'acc-3'),
+    ('invalid', 'acc-3'),
     (1, 'acc-1'),
     (2, 'acc-2'),
     (3, 'acc-3'),
@@ -74,21 +74,22 @@ def test_collect_account_items_from_legacy_fixture():
     assert items[0]['accountId'] == 'legacy-1'
 
 
-def test_collect_account_ids_prefers_active_or_extid():
+def test_collect_account_ids_preserves_all_account_order():
     step = load_fixture('account_chooser_groups.json')
     assert collect_account_ids(step) == ['acc-1', 'acc-2', 'acc-3']
 
 
-def test_collect_account_ids_fallback_without_flags():
+def test_collect_account_ids_keeps_accounts_without_status_flags():
     step = {
         'groups': [
             {'accounts': [
-                {'accountId': 'only-id-1'},
-                {'accountId': 'only-id-2'},
+                {'accountId': 'active-id', 'isActive': True},
+                {'accountId': 'inactive-id', 'isActive': False},
+                {'accountId': 'legacy-id'},
             ]}
         ]
     }
-    assert collect_account_ids(step) == ['only-id-1', 'only-id-2']
+    assert collect_account_ids(step) == ['active-id', 'inactive-id', 'legacy-id']
 
 
 def test_collect_account_ids_skips_active_without_account_id():

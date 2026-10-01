@@ -16,6 +16,9 @@ data/channels.txt
 data/epg.txt
 data/disabled_channels.txt
 data/api_version.txt
+data/api_backoff.txt
+data/api_version_probe.txt
+data/api_version_check.txt
 
 # lokální poznámky k PR / fóru
 PR_BODY.md

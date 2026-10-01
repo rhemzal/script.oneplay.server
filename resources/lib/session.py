@@ -19,18 +19,29 @@ from resources.lib.utils import (
 
 _login_failure_until = 0
 _login_failure_message = ''
+_login_cooldown_last_log = 0
+_LOGIN_COOLDOWN_LOG_INTERVAL = 60
 _session_lock = threading.RLock()
 
 
 def _fail_login(message, data=None):
-    global _login_failure_until, _login_failure_message
+    global _login_failure_until, _login_failure_message, _login_cooldown_last_log
+    now = int(time.time())
+    if isinstance(data, dict) and data.get('cooldown'):
+        try:
+            retry_after = max(1, int(data.get('retry_after', 0)))
+        except (TypeError, ValueError):
+            retry_after = 300
+        message = 'API cooldown aktivní: ' + str(data.get('err') or message)
+    else:
+        retry_after = 900 if 'Too Many Requests' in message or '429' in message else 300
     with _session_lock:
-        if 'Too Many Requests' in message or '429' in message:
-            _login_failure_until = int(time.time()) + 900
-        else:
-            _login_failure_until = int(time.time()) + 300
+        _login_failure_until = now + retry_after
         _login_failure_message = message
+        _login_cooldown_last_log = now
     detail = str(data) if data is not None and is_debug() else None
+    if isinstance(data, dict) and data.get('cooldown'):
+        raise OneplayError(message, detail)
     raise_error(message, detail)
 
 
@@ -55,8 +66,9 @@ def _perform_login():
                 log_message('ShowAccountChooserStep: ' + str(data['step']))
             _fail_login('Problém při přihlášení - žádné dostupné účty', data)
         accountId = select_account_id(accounts, get_config_value('poradi_sluzby'))
+        log_message('Výběr služby: ' + str(accounts.index(accountId) + 1) + '/' + str(len(accounts)))
         if is_debug():
-            log_message('Dostupné účty: ' + str(len(accounts)) + ', vybraný (poradi_sluzby=' + str(get_config_value('poradi_sluzby')) + '): ' + str(accountId))
+            log_message('Dostupných služeb: ' + str(len(accounts)))
         post = {"payload":{"command":{"schema":"LoginWithAccountCommand","accountId":accountId,"authCode":authToken}}}
         data = call_api(url = api_url('user.login.step'), data = post)
         api_error = get_api_error(data)
@@ -104,10 +116,15 @@ def _perform_login():
 
 
 def get_token():
+    global _login_cooldown_last_log
     with _session_lock:
         if _login_failure_until > int(time.time()):
-            msg = _login_failure_message + ' (další pokus za ' + str(_login_failure_until - int(time.time())) + ' s)'
-            log_error(msg)
+            now = int(time.time())
+            remaining = _login_failure_until - now
+            msg = _login_failure_message + ' (další pokus za ' + str(remaining) + ' s)'
+            if now - _login_cooldown_last_log >= _LOGIN_COOLDOWN_LOG_INTERVAL:
+                _login_cooldown_last_log = now
+                log_error('Přihlašovací cooldown aktivní', msg)
             raise OneplayError(msg)
         return _perform_login()
 
@@ -145,7 +162,7 @@ def load_session(reset = False):
         token = _read_cached_token()
         if token:
             return token
-        token = _perform_login()
+        token = get_token()
         save_session(token)
         return token
 

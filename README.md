@@ -13,6 +13,7 @@ Nainstalujte doplněk a v jeho nastavení vyplňte přihlašovací údaje, devic
 Oneplay Server pro své fungování vyžaduje python moduly bottle a websocket. Nainstaluje buď jako balíček OS nebo pomocí pip3 (pip3 install &lt;module&gt;)
 
 Rozbalte zip, zkopírujte config.txt.sample na config.txt a v něm vyplňte jméno, heslo, deviceid a IP adresu nebo jméno serveru. Server spusťte z adresáře service.oneplay.server spuštěním python3 server.py.<br>
+Při více službách pod jedním přihlášením určuje <code>poradi_sluzby</code> pořadí výběru: <code>1</code> je první účet, <code>2</code> druhý a záporná hodnota poslední. Server zaznamená pouze pořadí vybrané služby, ne její ID.<br>
 Pokud chcete Oneplay Server spustit na linuxu se systemd jako službu, jako root/přes sudo:
 - upravte a zkopírujte <code>scripts/oneplay_server.service</code> do <code>/etc/systemd/system/oneplay_server.service</code> (cesty User, venv, WorkingDirectory)
 - <b>ne</b> používejte <code>ExecStartPre</code> s mazáním <code>session.txt</code> / <code>channels.txt</code> – po každém restartu služby to způsobí nový login a při TVH scanu nestabilní start
@@ -128,7 +129,9 @@ Playlist s jednou skupinou (atribut <code>group-title</code> v M3U): http://127.
 
 EPG lze pak stáhnout z http://<adresa nebo jméno serveru>:<port (defaultně 8082)>/epg, např. http://127.0.0.1:8082/epg
 
-Health check (monitoring): http://127.0.0.1:8082/health – JSON s poli <code>status</code> (<code>ok</code> / <code>degraded</code> / <code>error</code>), <code>version</code>, <code>api_version</code>, <code>session_cached</code>, <code>channels_cached</code>, <code>login_backoff</code> (sekundy do dalšího login pokusu). Endpoint nevolá login – čte jen cache ze souborů.
+Health check (monitoring): http://127.0.0.1:8082/health – JSON s poli <code>status</code> (<code>ok</code> / <code>degraded</code> / <code>error</code>), <code>version</code>, <code>api_version</code>, <code>session_cached</code>, <code>channels_cached</code>, <code>login_backoff</code> (sekundy do dalšího login pokusu) a <code>api_backoff</code> (sekundy do dalšího požadavku na Oneplay API). Endpoint nevolá login ani API.
+
+Při výpadku, HTTP 429 nebo neznámé API verzi se požadavky pozastaví persistentním cooldownem s exponenciálním prodlužováním; chráněné HTTP požadavky vracejí <code>503</code> a hlavičku <code>Retry-After</code>. Detekce API verze zkouší nejvýše pět kandidátů na dávku a pokračování ukládá do runtime cache. Navíc při prvním API požadavku po 30 dnech ověří právě následující minor verzi; čas kontroly ukládá do runtime cache, podporovanou verzi automaticky nasadí a při cooldownu žádný probe neprovádí. EPG refresh při chybě zachová poslední validní cache a plánovač pokračuje po doběhnutí cooldownu.
 
 V <code>config.txt</code> lze nastavit cache živých stream URL (snížení zátěže API při TVH scanu):
 <ul>
@@ -147,7 +150,7 @@ Oproti upstream tagu <b>1.5.5</b> (waladir obsahuje jen opravu načítání úč
 
 <ul>
 <li>podporu starého i nového formátu výběru účtu (<code>helpers.collect_account_ids</code>)</li>
-<li>ochranu proti opakovaným login pokusům (rate limit API, 300 s cooldown)</li>
+<li>ochranu API proti opakovaným požadavkům při výpadku/429 (persistentní exponenciální cooldown)</li>
 <li>srozumitelnější logování chyb API místo Python tracebacku</li>
 <li>vícevláknový HTTP server (<code>ThreadedWSGIServer</code>)</li>
 <li>HTTP 303 redirect v <code>/play/</code> (kompatibilita s TVHeadend ffmpeg)</li>

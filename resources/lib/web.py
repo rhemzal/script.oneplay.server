@@ -16,7 +16,7 @@ from resources.lib.channels import load_channels, load_diasbled_channels, save_d
 from resources.lib.epg import get_epg, load_epg, get_live_epg, get_channel_epg
 from resources.lib.stream import get_live, get_archive
 from resources.lib.stream_cache import clear as clear_stream_cache
-from resources.lib.api import load_api_version
+from resources.lib.api import load_api_version, get_api_backoff_seconds
 from resources.lib.helpers import is_truthy, resolve_channel_name_by_number
 from resources.lib.utils import get_config_value, get_script_path, get_version, check_client_network, check_ip_whitelist, OneplayError, log_error, is_debug, log_message
 
@@ -69,8 +69,11 @@ class OneplayErrorPlugin:
             except HTTPError:
                 raise
             except OneplayError as e:
-                response.status = 500
+                retry_after = max(get_login_backoff_seconds(), get_api_backoff_seconds())
+                response.status = 503 if retry_after else 500
                 response.content_type = 'text/plain; charset=UTF-8'
+                if retry_after:
+                    response.set_header('Retry-After', str(retry_after))
                 return e.message
             except Exception as e:
                 log_error('Neočekávaná chyba', str(e))
@@ -121,7 +124,8 @@ def health():
         session_cached = is_session_cached()
         _, channels_count = read_channels_cache()
         login_backoff = get_login_backoff_seconds()
-        if login_backoff > 0:
+        api_backoff = get_api_backoff_seconds()
+        if login_backoff > 0 or api_backoff > 0:
             status = 'degraded'
         elif session_cached and channels_count > 0:
             status = 'ok'
@@ -134,6 +138,7 @@ def health():
             'session_cached': session_cached,
             'channels_cached': channels_count,
             'login_backoff': login_backoff,
+            'api_backoff': api_backoff,
         }
     except Exception as e:
         log_error('Health check', str(e))
@@ -150,7 +155,7 @@ def epg():
     if  int(get_config_value('interval_stahovani_epg')) > 0:
         output = load_epg()
     else:
-        output = get_epg()
+        output = load_epg(reset=True, stale_on_error=True)
     response.content_type = 'xml/application; charset=UTF-8'
     return output
 

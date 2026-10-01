@@ -1,13 +1,25 @@
 # -*- coding: utf-8 -*-
 import json
+import threading
 import time
 from datetime import datetime, timezone
+from xml.etree import ElementTree
 
-from resources.lib.api import call_api, api_url
-from resources.lib.session import load_session
+from resources.lib.api import call_api, api_url, get_api_backoff_seconds
+from resources.lib.session import load_session, get_login_backoff_seconds
 from resources.lib.channels import load_channels
-from resources.lib.helpers import is_truthy, channel_display_name, parse_epg_item_action
-from resources.lib.utils import replace_by_html_entity, get_config_value, save_json_data, load_json_data, display_message, log_error
+from resources.lib.helpers import is_truthy, channel_display_name, parse_epg_item_action, get_api_error
+from resources.lib.utils import replace_by_html_entity, get_config_value, save_json_data, load_json_data, display_message, log_error, raise_error
+
+_epg_lock = threading.RLock()
+
+
+def _require_api_success(data, action):
+    error = get_api_error(data)
+    if error:
+        raise_error(action, error)
+    if not isinstance(data, dict):
+        raise_error(action, 'Neplatná odpověď Oneplay API')
 
 def get_channel_epg(channel_id, from_ts, to_ts):
     token = load_session()
@@ -19,8 +31,8 @@ def get_channel_epg(channel_id, from_ts, to_ts):
         md_stream = int(channel[1])
     post = {"payload":{"criteria":{"channelSetId":"channel_list.1","viewport":{"channelRange":{"from":0,"to":200},"timeRange":{"from":datetime.fromtimestamp(from_ts-7200).strftime('%Y-%m-%dT%H:%M:%S') + '.000Z',"to":datetime.fromtimestamp(to_ts-3600).strftime('%Y-%m-%dT%H:%M:%S') + '.000Z'},"schema":"EpgViewportAbsolute"}},"requestedOutput":{"channelList":"none","datePicker":False,"channelSets":False}}}
     data = call_api(url = api_url('epg.display'), data = post, token = token)
-    if 'err' not in data:
-        for channel in data.get('schedule', []):
+    _require_api_success(data, 'Nepodařilo se načíst EPG kanálu')
+    for channel in data.get('schedule', []):
             if channel.get('channelId') == channel_id:
                 for item in channel.get('items', []):
                     startts = int(datetime.fromisoformat(item['startAt']).timestamp())
@@ -33,8 +45,8 @@ def get_channel_epg(channel_id, from_ts, to_ts):
                         stream_number = 1
                         post = {"payload":{"contentId":id}}
                         md_data = call_api(url = api_url('page.content.display'), data = post, token = token)
-                        if 'err' not in md_data:                        
-                            for block in md_data['layout']['blocks']:
+                        _require_api_success(md_data, 'Nepodařilo se načíst multidimenzi EPG')
+                        for block in md_data['layout']['blocks']:
                                 if block['schema'] == 'TabBlock':
                                     for md_item in block['layout']['blocks'][0]['carousels'][0]['tiles']:
                                         if md_stream == stream_number:
@@ -58,10 +70,8 @@ def get_day_epg(from_ts, to_ts):
     epg = {}
     post = {"payload":{"criteria":{"channelSetId":"channel_list.1","viewport":{"channelRange":{"from":0,"to":200},"timeRange":{"from":datetime.fromtimestamp(from_ts).strftime('%Y-%m-%dT%H:%M:%S') + '.000Z',"to":datetime.fromtimestamp(to_ts).strftime('%Y-%m-%dT%H:%M:%S') + '.000Z'},"schema":"EpgViewportAbsolute"}},"requestedOutput":{"channelList":"none","datePicker":False,"channelSets":False}}}
     data = call_api(url = api_url('epg.display'), data = post, token = token)
-    if 'err' in data:
-        data = call_api(url = api_url('epg.display'), data = post, token = token)
-    if 'err' not in data:
-        for channel in data.get('schedule', []):
+    _require_api_success(data, 'Nepodařilo se načíst denní EPG')
+    for channel in data.get('schedule', []):
             if channel.get('channelId') in channels:
                 for item in channel.get('items', []):
                     startts = int(datetime.fromisoformat(item['startAt']).timestamp())
@@ -74,8 +84,8 @@ def get_day_epg(from_ts, to_ts):
                                 stream_number = 1
                                 post = {"payload":{"contentId":id}}
                                 md_data = call_api(url = api_url('page.content.display'), data = post, token = token)
-                                if 'err' not in md_data:
-                                    for block in md_data['layout']['blocks']:
+                                _require_api_success(md_data, 'Nepodařilo se načíst multidimenzi EPG')
+                                for block in md_data['layout']['blocks']:
                                         if block['schema'] == 'TabBlock':
                                             for md_item in block['layout']['blocks'][0]['carousels'][0]['tiles']:
                                                 md_id = None
@@ -122,6 +132,8 @@ def get_live_epg():
 def get_epg():
     tz_offset = int(datetime.now(timezone.utc).astimezone().utcoffset().total_seconds() / 3600)
     channels = load_channels()
+    if not channels:
+        raise_error('Chyba při stahování EPG', 'Seznam kanálů je prázdný')
     output = ''
     if len(channels) > 0:
         try:
@@ -168,27 +180,65 @@ def get_epg():
         except Exception as error:
             log_error('Chyba při stahování EPG', str(error))
             display_message('Chyba při stahování EPG!')
+            raise
     return output                                        
 
-def load_epg(reset = False):
-    epg = ''
-    if reset == True:
-        epg = get_epg()
+
+def _is_valid_epg(epg):
+    if not isinstance(epg, str) or not epg.strip():
+        return False
+    try:
+        root = ElementTree.fromstring(epg)
+    except ElementTree.ParseError:
+        return False
+    return root.tag == 'tv' and root.find('channel') is not None
+
+
+def load_epg(reset = False, stale_on_error = False):
+    with _epg_lock:
+        cached_epg = None
+        if not reset or stale_on_error:
+            data = load_json_data({'filename' : 'epg.txt', 'description' : 'EPG'})
+            try:
+                cached_epg = json.loads(data).get('epg') if data is not None else None
+            except (TypeError, ValueError, AttributeError):
+                cached_epg = None
+            if not reset and _is_valid_epg(cached_epg):
+                return cached_epg
+            if stale_on_error and _is_valid_epg(cached_epg):
+                if max(get_api_backoff_seconds(), get_login_backoff_seconds()) > 0:
+                    return cached_epg
+
+        try:
+            epg = get_epg()
+        except Exception as error:
+            if stale_on_error and _is_valid_epg(cached_epg):
+                log_error('Obnova EPG selhala, používám uloženou cache', str(error))
+                return cached_epg
+            raise
+        if not _is_valid_epg(epg):
+            raise_error('Chyba při stahování EPG', 'Nová EPG data nejsou úplná')
         save_epg(epg)
         return epg
-    data = load_json_data({'filename' : 'epg.txt', 'description' : 'EPG'})
-    if data is not None:
-        data = json.loads(data)
-        if 'epg' in data and len(data['epg']) > 0:
-            return data['epg']
-        else:
-            epg = get_epg()
-            save_epg(epg)
-    else:
-        epg = get_epg()
-        save_epg(epg)
-    return epg
+
+
+def refresh_epg_safely():
+    try:
+        load_epg(reset=True)
+        return True
+    except Exception as error:
+        log_error('Plánované stahování EPG selhalo', str(error))
+        return False
+
+
+def next_epg_retry_delay(interval_seconds):
+    interval_seconds = max(1, int(interval_seconds))
+    cooldown = max(get_api_backoff_seconds(), get_login_backoff_seconds())
+    return cooldown if cooldown > 0 else interval_seconds
+
 
 def save_epg(epg):
+    if not _is_valid_epg(epg):
+        raise_error('Chyba při ukládání EPG', 'Nová EPG data nejsou úplná')
     data = json.dumps({'epg' : epg})
     save_json_data({'filename' : 'epg.txt', 'description' : 'EPG'}, data)

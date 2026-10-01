@@ -13,9 +13,11 @@ import resources.lib.session as session_module
 def reset_session_state():
     session_module._login_failure_until = 0
     session_module._login_failure_message = ''
+    session_module._login_cooldown_last_log = 0
     yield
     session_module._login_failure_until = 0
     session_module._login_failure_message = ''
+    session_module._login_cooldown_last_log = 0
 
 
 def test_load_session_uses_cache_without_login(monkeypatch, tmp_path):
@@ -33,6 +35,46 @@ def test_load_session_uses_cache_without_login(monkeypatch, tmp_path):
         token = session_module.load_session()
     assert token == 'cached-token'
     perform_login.assert_not_called()
+
+
+def test_load_session_respects_login_backoff(monkeypatch):
+    monkeypatch.setattr(session_module, 'load_json_data', lambda file: None)
+    session_module._login_failure_until = int(time.time()) + 60
+    session_module._login_failure_message = 'Too Many Requests'
+
+    with patch.object(session_module, '_perform_login') as perform_login:
+        with pytest.raises(session_module.OneplayError, match='Too Many Requests'):
+            session_module.load_session()
+
+    perform_login.assert_not_called()
+
+
+def test_api_cooldown_sets_login_backoff_from_retry_after():
+    now = int(time.time())
+    with pytest.raises(session_module.OneplayError, match='API cooldown aktivní'):
+        session_module._fail_login('Problém při přihlášení', {
+            'cooldown': True,
+            'retry_after': 240,
+            'err': 'Oneplay API cooldown: Too Many Requests',
+        })
+
+    assert session_module._login_failure_until == now + 240
+    assert session_module._login_failure_message.startswith('API cooldown aktivní:')
+
+
+def test_login_backoff_is_logged_as_cooldown_without_request_spam(monkeypatch):
+    monkeypatch.setattr(session_module, 'load_json_data', lambda file: None)
+    session_module._login_failure_until = int(time.time()) + 60
+    session_module._login_failure_message = 'API cooldown aktivní: Too Many Requests'
+
+    with patch.object(session_module, 'log_error') as log:
+        for _ in range(3):
+            with pytest.raises(session_module.OneplayError, match='API cooldown aktivní'):
+                session_module.load_session()
+
+    log.assert_called_once()
+    assert log.call_args.args[0] == 'Přihlašovací cooldown aktivní'
+    assert 'další pokus za' in log.call_args.args[1]
 
 
 def test_load_session_serializes_parallel_refresh(monkeypatch):

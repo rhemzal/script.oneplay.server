@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 import json
+import threading
 import time
 
-from resources.lib.api import call_api, api_url
-from resources.lib.session import load_session
-from resources.lib.utils import load_json_data, save_json_data, raise_error, get_config_value
+from resources.lib.api import call_api, api_url, get_api_backoff_seconds
+from resources.lib.session import load_session, get_login_backoff_seconds
+from resources.lib.utils import load_json_data, save_json_data, raise_error, get_config_value, OneplayError, log_error
+
+_channels_lock = threading.RLock()
 
 def get_channels():
     md_channels = [{'name' : 'Oneplay Sport 1', 'count' : 8}, {'name' : 'Oneplay Sport 2', 'count' : 8}, {'name' : 'Oneplay Sport 3', 'count' : 4}, {'name' : 'Oneplay Sport 4', 'count' : 4}]
@@ -54,6 +57,11 @@ def get_channels():
     return channels
 
 def load_channels(reset = False):
+    with _channels_lock:
+        return _load_channels(reset)
+
+
+def _load_channels(reset = False):
     valid_to = -1
     channels = {}
     if reset == True:
@@ -72,7 +80,15 @@ def load_channels(reset = False):
             channels = get_channels()
             save_channels(channels)
         if not valid_to or valid_to == -1 or valid_to < int(time.time()):
-            channels = get_channels()
+            if channels and max(get_api_backoff_seconds(), get_login_backoff_seconds()) > 0:
+                return channels
+            try:
+                channels = get_channels()
+            except OneplayError as error:
+                if not channels:
+                    raise
+                log_error('Obnova kanálů selhala, používám uloženou cache', str(error))
+                return channels
             save_channels(channels)
     else:
         channels = get_channels()

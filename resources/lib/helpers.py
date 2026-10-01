@@ -26,15 +26,13 @@ def channel_display_name(name, strip_hd=False):
 def select_account_id(account_ids, poradi_sluzby):
     if not account_ids:
         return ''
-    if poradi_sluzby is None:
-        return account_ids[0]
     try:
         index = int(poradi_sluzby)
     except (TypeError, ValueError):
-        return account_ids[0]
-    if index < 1 or index > len(account_ids):
-        return account_ids[0]
-    return account_ids[index - 1]
+        index = -1
+    if 1 <= index <= len(account_ids):
+        return account_ids[index - 1]
+    return account_ids[-1]
 
 
 def collect_account_items(step):
@@ -45,14 +43,7 @@ def collect_account_items(step):
 
 
 def collect_account_ids(step):
-    account_ids = []
-    for acc in collect_account_items(step):
-        account_id = acc.get('accountId')
-        if account_id and (acc.get('extId') or acc.get('isActive')):
-            account_ids.append(account_id)
-    if not account_ids:
-        account_ids = [acc['accountId'] for acc in collect_account_items(step) if acc.get('accountId')]
-    return account_ids
+    return [acc['accountId'] for acc in collect_account_items(step) if acc.get('accountId')]
 
 
 def resolve_channel_name_by_number(channels, channel_number, strip_hd=False):
