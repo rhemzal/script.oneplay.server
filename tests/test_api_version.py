@@ -35,6 +35,16 @@ def test_load_api_version_defaults_to_base(json_storage):
     assert saved['api_version'] == api_module.BASE_API_VERSION
 
 
+def test_api_backoff_base_delays_are_one_minute():
+    assert api_module._API_RATE_LIMIT_DELAY == 60
+    assert api_module._API_NOT_FOUND_DELAY == 60
+    assert api_module._API_TRANSIENT_DELAY == 60
+
+
+def test_api_version_check_interval_is_six_hours():
+    assert api_module._API_VERSION_CHECK_INTERVAL == 6 * 60 * 60
+
+
 def test_load_api_version_reads_persisted_value(json_storage):
     json_storage['api_version.txt'] = json.dumps({'api_version': 'v1.12'})
     assert api_module.load_api_version() == 'v1.12'
@@ -55,7 +65,7 @@ def test_get_api_version_detects_new_version(json_storage):
             raise HTTPError(url, 404, 'Not Found', None, None)
         if 'v1.13' in url:
             raise HTTPError(url, 400, 'Bad Request', None, None)
-        return MagicMock()
+        raise HTTPError(url, 404, 'Not Found', None, None)
 
     with patch.object(api_module, 'urlopen', fake_urlopen):
         version = api_module.get_api_version()
@@ -70,7 +80,12 @@ def test_get_api_version_accepts_successful_probe_response(json_storage):
     response = MagicMock()
     response.getcode.return_value = 200
 
-    with patch.object(api_module, 'urlopen', return_value=response):
+    def supported_then_missing(request, timeout=10):
+        if 'v1.12/' in request.full_url:
+            return response
+        raise HTTPError(request.full_url, 404, 'Not Found', None, None)
+
+    with patch.object(api_module, 'urlopen', supported_then_missing):
         version = api_module.get_api_version()
 
     assert version == 'v1.12'
@@ -82,12 +97,19 @@ def test_monthly_check_promotes_next_minor_version(json_storage):
     json_storage['api_version_check.txt'] = json.dumps({'checked_at': 0})
     response = MagicMock()
     response.getcode.return_value = 200
+    calls = []
 
-    with patch.object(api_module, 'urlopen', return_value=response) as probe:
+    def supported_then_missing(request, timeout=10):
+        calls.append(request.full_url)
+        if 'v1.12/' in request.full_url:
+            return response
+        raise HTTPError(request.full_url, 404, 'Not Found', None, None)
+
+    with patch.object(api_module, 'urlopen', supported_then_missing):
         version = api_module.check_api_version_if_due()
 
     assert version == 'v1.12'
-    assert probe.call_args.args[0].full_url == api_module.API_BASE + 'v1.12/user.login.step'
+    assert len(calls) == 2
     assert json.loads(json_storage['api_version.txt'])['api_version'] == 'v1.12'
     assert int(json.loads(json_storage['api_version_check.txt'])['checked_at']) > 0
 
@@ -97,7 +119,9 @@ def test_monthly_check_accepts_bad_request_as_supported_version(json_storage):
     json_storage['api_version_check.txt'] = json.dumps({'checked_at': 0})
 
     def bad_request_probe(request, timeout=10):
-        raise HTTPError(request.full_url, 400, 'Bad Request', None, None)
+        if 'v1.12/' in request.full_url:
+            raise HTTPError(request.full_url, 400, 'Bad Request', None, None)
+        raise HTTPError(request.full_url, 404, 'Not Found', None, None)
 
     with patch.object(api_module, 'urlopen', bad_request_probe):
         version = api_module.check_api_version_if_due()
@@ -150,7 +174,12 @@ def test_call_api_rebases_url_after_monthly_version_update(json_storage):
     response = MagicMock()
     response.getcode.return_value = 200
 
-    with patch.object(api_module, 'urlopen', return_value=response):
+    def supported_then_missing(request, timeout=10):
+        if 'v1.12/' in request.full_url:
+            return response
+        raise HTTPError(request.full_url, 404, 'Not Found', None, None)
+
+    with patch.object(api_module, 'urlopen', supported_then_missing):
         with patch.object(api_module, '_call_api_unchecked', return_value={'result': {'status': 'Ok'}}) as request:
             api_module.call_api(api_module.API_BASE + 'v1.11/epg.display', {}, token=None)
 
@@ -189,6 +218,38 @@ def test_get_api_version_scans_a_bounded_batch_after_404(json_storage):
     assert json.loads(json_storage['api_version_probe.txt'])['next_minor'] == 17
 
 
+def test_get_api_version_accepts_unauthorized_response_as_supported_endpoint(json_storage):
+    json_storage['api_version.txt'] = json.dumps({'api_version': 'v1.11'})
+
+    def unauthorized_probe(request, timeout=10):
+        if 'v1.12/' in request.full_url:
+            raise HTTPError(request.full_url, 401, 'Unauthorized', None, None)
+        raise HTTPError(request.full_url, 404, 'Not Found', None, None)
+
+    with patch.object(api_module, 'urlopen', unauthorized_probe):
+        version = api_module.get_api_version()
+
+    assert version == 'v1.12'
+    assert json.loads(json_storage['api_version.txt'])['api_version'] == 'v1.12'
+    assert json_storage['api_version_probe.txt'] == '{}'
+
+
+def test_get_api_version_saves_cursor_before_transient_probe_failure(json_storage):
+    json_storage['api_version.txt'] = json.dumps({'api_version': 'v1.11'})
+
+    def not_found_then_unavailable(request, timeout=10):
+        if 'v1.12/' in request.full_url:
+            raise HTTPError(request.full_url, 404, 'Not Found', None, None)
+        raise HTTPError(request.full_url, 503, 'Service Unavailable', None, None)
+
+    with patch.object(api_module, 'urlopen', not_found_then_unavailable):
+        version = api_module.get_api_version()
+
+    assert version == 'v1.11'
+    assert json.loads(json_storage['api_version_probe.txt'])['next_minor'] == 13
+    assert json.loads(json_storage['api_backoff.txt'])['kind'] == 'transient'
+
+
 def test_get_api_version_resumes_from_cursor_and_saves_discovered_version(json_storage):
     json_storage['api_version.txt'] = json.dumps({'api_version': 'v1.11'})
     json_storage['api_version_probe.txt'] = json.dumps({'next_minor': 17})
@@ -200,13 +261,13 @@ def test_get_api_version_resumes_from_cursor_and_saves_discovered_version(json_s
             raise HTTPError(request.full_url, 404, 'Not Found', None, None)
         if 'v1.18/' in request.full_url:
             raise HTTPError(request.full_url, 400, 'Bad Request', None, None)
-        raise AssertionError('probe continued after finding the API version')
+        raise HTTPError(request.full_url, 404, 'Not Found', None, None)
 
     with patch.object(api_module, 'urlopen', fake_urlopen):
         version = api_module.get_api_version()
 
     assert version == 'v1.18'
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert json.loads(json_storage['api_version.txt'])['api_version'] == 'v1.18'
     assert json_storage['api_version_probe.txt'] == '{}'
 

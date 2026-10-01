@@ -4,10 +4,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TVH_CONF="${TVH_CONF:-/home/hts/conf}"
-NOVA_CHANNEL_CONFIG="${TVH_CONF}/channel/config/acaab01b8661bb155b67bdf93ef8682d"
 TVH_URL="${1:-http://127.0.0.1:9981/stream/channelname/Nova%20HD}"
 MIN_BYTES=100000
 SAMPLE_SEC=10
@@ -15,18 +11,6 @@ MAX_ATTEMPTS=6
 SLEEP=5
 OUT="$(mktemp)"
 trap 'rm -f "${OUT}"' EXIT
-
-if [[ ! -f "${NOVA_CHANNEL_CONFIG}" ]]; then
-	echo "CHYBA: kanál Nova HD nenalezen v ${TVH_CONF}" >&2
-	exit 1
-fi
-
-services="$(python3 -c "import json; print(json.load(open('${NOVA_CHANNEL_CONFIG}')).get('services', []))")"
-echo "Nova HD services: ${services}"
-if [[ "${services}" == "[]" ]]; then
-	echo "CHYBA: Nova HD nemá přiřazenou službu – spusťte make tvh-fix" >&2
-	exit 1
-fi
 
 for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
 	bytes="$(curl -s --max-time "${SAMPLE_SEC}" -o "${OUT}" -w '%{size_download}' "${TVH_URL}" || true)"

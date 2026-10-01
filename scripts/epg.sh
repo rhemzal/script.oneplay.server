@@ -1,7 +1,8 @@
 #!/bin/bash
-XMLTV_SOCK=/home/hts/.hts/tvheadend/epggrab/xmltv.sock
-EPG_URL=http://localhost:8082/epg
-EPG_FILE=/tmp/epg.xml
+TVH_CONF="${TVH_CONF:-${HOME}/.hts/tvheadend}"
+XMLTV_SOCK="${XMLTV_SOCK:-${TVH_CONF}/epggrab/xmltv.sock}"
+EPG_URL="${EPG_URL:-http://localhost:8082/epg}"
+EPG_FILE="${EPG_FILE:-/tmp/epg.xml}"
 EPG_TEMP="${EPG_FILE}.tmp.$$"
 
 set -euo pipefail

@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIX_SCRIPT="${SCRIPT_DIR}/fix_tvh_channel_services.sh"
-TVH_CONF="${TVH_CONF:-/home/hts/conf}"
+TVH_CONF="${TVH_CONF:-${HOME}/.hts/tvheadend}"
 POLL_INTERVAL="${TVH_AUTO_FIX_POLL_INTERVAL:-5}"
 POLL_MAX="${TVH_AUTO_FIX_POLL_MAX:-120}"
 LOCK_FILE="${TVH_AUTO_FIX_LOCK:-/tmp/oneplay-tvh-auto-fix.lock}"

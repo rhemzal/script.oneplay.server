@@ -15,11 +15,11 @@ Oneplay Server pro své fungování vyžaduje python moduly bottle a websocket. 
 Rozbalte zip, zkopírujte config.txt.sample na config.txt a v něm vyplňte jméno, heslo, deviceid a IP adresu nebo jméno serveru. Server spusťte z adresáře service.oneplay.server spuštěním python3 server.py.<br>
 Při více službách pod jedním přihlášením určuje <code>poradi_sluzby</code> pořadí výběru: <code>1</code> je první účet, <code>2</code> druhý a záporná hodnota poslední. Server zaznamená pouze pořadí vybrané služby, ne její ID.<br>
 Pokud chcete Oneplay Server spustit na linuxu se systemd jako službu, jako root/přes sudo:
-- upravte a zkopírujte <code>scripts/oneplay_server.service</code> do <code>/etc/systemd/system/oneplay_server.service</code> (cesty User, venv, WorkingDirectory)
+- upravte <code>scripts/oneplay_server.service</code> podle svého uživatele a instalační cesty a zkopírujte ho do <code>/etc/systemd/system/oneplay_server.service</code>
 - <b>ne</b> používejte <code>ExecStartPre</code> s mazáním <code>session.txt</code> / <code>channels.txt</code> – po každém restartu služby to způsobí nový login a při TVH scanu nestabilní start
 - <code>systemctl daemon-reload && systemctl enable oneplay_server && systemctl start oneplay_server</code>
 
-V <code>config.txt</code> držte <code>debug</code> na <b>0</b> v produkci – při <code>debug=1</code> se do journalu logují celé JSON odpovědi API a server se při TVH scanu výrazně zpomalí.
+V <code>config.txt</code> držte <code>debug</code> na <b>0</b> při běžném provozu – při <code>debug=1</code> se do journalu logují celé JSON odpovědi API a server se při TVH scanu výrazně zpomalí.
 
 <b><u>Checklist po deploy / změně playlistu</u></b>
 
@@ -34,39 +34,9 @@ V <code>config.txt</code> držte <code>debug</code> na <b>0</b> v produkci – p
 
 <b>Ruční postup</b> (bez auto-fixu nebo při diagnostice): <code>make tvh-fix</code> → <code>sudo systemctl restart tvheadend</code> → <code>make verify-tvh</code>, případně vše v jednom <code>make tvh-restart</code>.
 
-<b><u>Provozní režim (produkce)</u></b>
+<b><u>Po Force scan IPTV sítě</u></b>
 
-Na serveru xibo (větev <code>develop</code>, verze <b>1.5.8</b>) je nasazený automatický tvh-fix. <b>Služby mohou běžet bez dalších zásahů</b> – rutinně není potřeba ručně spouštět <code>make tvh-fix</code> ani <code>make tvh-restart</code>.
-
-<table>
-<tr><th>Služba</th><th>Stav</th><th>Poznámka</th></tr>
-<tr><td><code>oneplay_server</code></td><td>systemd</td><td>Playlist/EPG na 8082, <code>debug=0</code>, bez <code>ExecStartPre</code> mazání session</td></tr>
-<tr><td><code>tvheadend</code></td><td>systemd + drop-in</td><td><code>/etc/systemd/system/tvheadend.service.d/oneplay-tvh-fix.conf</code></td></tr>
-<tr><td>Auto tvh-fix</td><td>ExecStartPost</td><td>Čeká na mux (max 120 s), fix Oneplay1 + výchozí síť, restart TVH jen když <code>opraveno &gt; 0</code></td></tr>
-</table>
-
-<b>Co se děje po <code>systemctl restart tvheadend</code></b>
-<ul>
-<li>Mapování kanálů už OK → jeden start, v logu <code>opraveno: 0</code>, žádný další restart</li>
-<li>Mapování rozbité (prázdné <code>services</code>) → fix opraví kanály → <b>jeden</b> další restart TVH → konec (bez smyčky)</li>
-<li>První restart po Force scan může trvat ~30–60 s (mux parse + případný druhý start)</li>
-</ul>
-
-<b>Monitoring</b>
-<ul>
-<li><code>make health</code> – OnePlay <code>/health</code></li>
-<li><code>make verify-tvh</code> – Nova HD přes TVH 9981 (retry, očekáváno &gt;100 KB / 10 s)</li>
-<li><code>journalctl -t oneplay-tvh-auto-fix --since today</code> – log auto-fixu</li>
-<li><code>journalctl -u tvheadend --since "10 min ago"</code> – starty TVH (max 2 při rozbitém stavu)</li>
-</ul>
-
-<b>Kdy ještě ručně zasáhnout</b>
-<ul>
-<li>Aktualizace repozitáře – <code>git pull</code>, případně <code>sudo systemctl restart oneplay_server</code></li>
-<li>Změna drop-inu – znovu <code>make install-tvh-autofix</code> (aktualizuje cestu ke skriptu)</li>
-<li>Problémy se streamem – <code>make tvh-restart</code> jako nouzový full postup</li>
-<li>Opakované restarty TVH (&gt;2 za minutu) – zkontrolovat journal auto-fixu a TVH log</li>
-</ul>
+Mapování kanálů lze opravit pomocí <code>make tvh-fix</code> a následným restartem TVHeadend. Automatickou opravu po startu TVHeadend lze zapnout příkazem <code>make install-tvh-autofix</code>; před instalací nastavte cestu ke konfiguraci TVHeadend v proměnné <code>TVH_CONF</code>.
 
 <b><u>TVheadend</u></b>
 
@@ -107,7 +77,7 @@ V adresáři <code>scripts/</code> jsou pomocné nástroje pro provoz s TVHeaden
 <li><b>fix_tvh_channel_services.sh</b> – po Force scan v TVH opraví mapování kanál → služba (nová UUID služeb). Idempotentní, lze spouštět opakovaně.<br>
 <code>sudo ./scripts/fix_tvh_channel_services.sh</code> – výchozí síť Oneplay, pak Oneplay1<br>
 <code>sudo ./scripts/fix_tvh_channel_services.sh Oneplay1</code> – konkrétní síť (název nebo UUID)<br>
-<code>sudo env TVH_CONF=/home/hts/conf ./scripts/fix_tvh_channel_services.sh</code> – vlastní cesta ke konfiguraci TVH</li>
+<code>sudo env TVH_CONF=/path/to/tvheadend/config ./scripts/fix_tvh_channel_services.sh</code> – vlastní cesta ke konfiguraci TVH</li>
 <li><b>test_nova_hd.sh</b> – ověří, že OnePlay server vrací živý HLS stream (Nova HD)</li>
 <li><b>tvh_auto_fix.sh</b> – automatický fix mapování po startu TVHeadend (systemd ExecStartPost)<br>
 <code>sudo make install-tvh-autofix</code> – jednorázová instalace drop-in do <code>tvheadend.service.d</code><br>
@@ -131,7 +101,7 @@ EPG lze pak stáhnout z http://<adresa nebo jméno serveru>:<port (defaultně 80
 
 Health check (monitoring): http://127.0.0.1:8082/health – JSON s poli <code>status</code> (<code>ok</code> / <code>degraded</code> / <code>error</code>), <code>version</code>, <code>api_version</code>, <code>session_cached</code>, <code>channels_cached</code>, <code>login_backoff</code> (sekundy do dalšího login pokusu) a <code>api_backoff</code> (sekundy do dalšího požadavku na Oneplay API). Endpoint nevolá login ani API.
 
-Při výpadku, HTTP 429 nebo neznámé API verzi se požadavky pozastaví persistentním cooldownem s exponenciálním prodlužováním; chráněné HTTP požadavky vracejí <code>503</code> a hlavičku <code>Retry-After</code>. Detekce API verze zkouší nejvýše pět kandidátů na dávku a pokračování ukládá do runtime cache. Navíc při prvním API požadavku po 30 dnech ověří právě následující minor verzi; čas kontroly ukládá do runtime cache, podporovanou verzi automaticky nasadí a při cooldownu žádný probe neprovádí. EPG refresh při chybě zachová poslední validní cache a plánovač pokračuje po doběhnutí cooldownu.
+Při výpadku, HTTP 429 nebo neznámé API verzi se požadavky pozastaví persistentním cooldownem se základní dobou 60 sekund a exponenciálním prodlužováním; pokud Oneplay pošle <code>Retry-After</code>, server jej respektuje. Chráněné HTTP požadavky vracejí <code>503</code> a hlavičku <code>Retry-After</code>. Detekce API verze zkouší nejvýše pět kandidátů na dávku a pokračování ukládá do runtime cache. Při prvním API požadavku po šesti hodinách ověří až pět následujících minor verzí; čas kontroly i průběžný stav skenu ukládá do runtime cache, potvrzenou verzi automaticky nasadí a při cooldownu žádný probe neprovádí. EPG refresh při chybě zachová poslední validní cache a plánovač pokračuje po doběhnutí cooldownu.
 
 V <code>config.txt</code> lze nastavit cache živých stream URL (snížení zátěže API při TVH scanu):
 <ul>

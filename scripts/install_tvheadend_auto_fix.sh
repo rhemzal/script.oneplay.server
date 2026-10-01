@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TVH_CONF="${TVH_CONF:?Nastavte TVH_CONF na konfigurační adresář TVHeadend}"
 DROPIN_SRC="${SCRIPT_DIR}/tvheadend.service.d/oneplay-tvh-fix.conf"
 DROPIN_DST="/etc/systemd/system/tvheadend.service.d/oneplay-tvh-fix.conf"
 AUTO_FIX="${ROOT_DIR}/scripts/tvh_auto_fix.sh"
@@ -18,7 +19,7 @@ if [[ ! -x "${AUTO_FIX}" ]]; then
 fi
 
 mkdir -p /etc/systemd/system/tvheadend.service.d
-sed "s|/usr/src/oneplay/script.oneplay.server|${ROOT_DIR}|g" "${DROPIN_SRC}" > "${DROPIN_DST}"
+sed -e "s|@ROOT_DIR@|${ROOT_DIR}|g" -e "s|@TVH_CONF@|${TVH_CONF}|g" "${DROPIN_SRC}" > "${DROPIN_DST}"
 
 systemctl daemon-reload
 echo "OK: drop-in nainstalován: ${DROPIN_DST}"

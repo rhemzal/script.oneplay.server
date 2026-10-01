@@ -5,13 +5,13 @@
 # Použití: sudo ./scripts/fix_tvh_channel_services.sh [síť]
 #   síť = název (Oneplay1) nebo UUID sítě
 #   bez parametru: nejdřív Oneplay, pak Oneplay1
-#   TVH_CONF=/cesta/k/conf  – výchozí /home/hts/conf
+#   TVH_CONF=/cesta/k/config  – výchozí $HOME/.hts/tvheadend
 #
 # Skript je idempotentní – opakované spuštění nemění již správná mapování.
 
 set -euo pipefail
 
-TVH_CONF="${TVH_CONF:-/home/hts/conf}"
+TVH_CONF="${TVH_CONF:-${HOME}/.hts/tvheadend}"
 NETWORK="${1:-}"
 
 if [[ ! -d "$TVH_CONF" ]]; then
@@ -27,7 +27,8 @@ for sub in channel/config input/iptv/networks; do
 done
 
 if [[ "$(id -u)" -eq 0 ]]; then
-	SUDO_PREFIX=(sudo -u hts)
+    TVH_USER="${TVH_USER:-$(stat -c '%U' "${TVH_CONF}")}"
+    SUDO_PREFIX=(sudo -u "${TVH_USER}")
 else
 	SUDO_PREFIX=()
 fi

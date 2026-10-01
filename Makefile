@@ -1,7 +1,7 @@
 # OnePlay Server – provozní targety (spouštět z kořene repozitáře)
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 SCRIPTS := $(ROOT)/scripts
-TVH_CONF ?= /home/hts/conf
+TVH_CONF ?= $(HOME)/.hts/tvheadend
 
 .PHONY: help test health verify tvh-fix tvh-restart verify-tvh install-tvh-autofix
 
@@ -26,8 +26,8 @@ verify: health
 	bash $(SCRIPTS)/test_tvheadend_pipe.sh
 
 tvh-fix:
-	sudo env TVH_CONF=$(TVH_CONF) $(SCRIPTS)/fix_tvh_channel_services.sh Oneplay1
-	sudo env TVH_CONF=$(TVH_CONF) $(SCRIPTS)/fix_tvh_channel_services.sh
+	sudo env TVH_CONF="$(TVH_CONF)" $(SCRIPTS)/fix_tvh_channel_services.sh Oneplay1
+	sudo env TVH_CONF="$(TVH_CONF)" $(SCRIPTS)/fix_tvh_channel_services.sh
 
 # Po instalaci auto-fix (v1.5.8+) není nutný – auto-fix po restartu TVH dělá totéž
 tvh-restart: tvh-fix
@@ -40,4 +40,4 @@ verify-tvh:
 	bash $(SCRIPTS)/verify_tvh_nova.sh
 
 install-tvh-autofix:
-	sudo bash $(SCRIPTS)/install_tvheadend_auto_fix.sh
+	sudo env TVH_CONF="$(TVH_CONF)" bash $(SCRIPTS)/install_tvheadend_auto_fix.sh

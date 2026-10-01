@@ -13,7 +13,7 @@ from websocket import WebSocketException
 
 from resources.lib.utils import appVersion, get_config_value, log_message, log_error, load_json_data, save_json_data
 
-BASE_API_VERSION = 'v1.11'
+BASE_API_VERSION = 'v1.15'
 API_BASE = 'https://http.cms.jyxo.cz/api/'
 _API_BACKOFF_FILE = {'filename': 'api_backoff.txt', 'description': 'API cooldown'}
 _API_VERSION_PROBE_FILE = {'filename': 'api_version_probe.txt', 'description': 'API version probe'}
@@ -24,14 +24,14 @@ _API_BACKOFF_STATE = None
 _API_PROBE_IN_PROGRESS = False
 _API_COOLDOWN_LOG_INTERVAL = 60
 _API_COOLDOWN_LAST_LOG = 0
-_API_RATE_LIMIT_DELAY = 15 * 60
-_API_TRANSIENT_DELAY = 30
+_API_RATE_LIMIT_DELAY = 60
+_API_TRANSIENT_DELAY = 60
 _API_MAX_TRANSIENT_DELAY = 15 * 60
 _API_MAX_RATE_LIMIT_DELAY = 6 * 60 * 60
-_API_NOT_FOUND_DELAY = 15 * 60
+_API_NOT_FOUND_DELAY = 60
 _API_VERSION_PROBE_BATCH = 5
 _API_MAX_VERSION = 49
-_API_VERSION_CHECK_INTERVAL = 30 * 24 * 60 * 60
+_API_VERSION_CHECK_INTERVAL = 6 * 60 * 60
 
 
 def _load_api_backoff_state():
@@ -166,12 +166,29 @@ def _save_api_version_check(checked_at=None):
     save_json_data(_API_VERSION_CHECK_FILE, json.dumps({'checked_at': int(checked_at)}))
 
 
+def _save_api_version_probe(next_minor):
+    save_json_data(_API_VERSION_PROBE_FILE, json.dumps({'next_minor': int(next_minor)}))
+
+
+def _accept_api_version(version, status=None):
+    save_api_version(version)
+    save_json_data(_API_VERSION_PROBE_FILE, '{}')
+    _save_api_version_check()
+    status_text = 'HTTP ' + str(status) if status is not None else 'úspěšná odpověď'
+    log_message('Verze Oneplay API ' + version + ' potvrzena (' + status_text + ')')
+
+
 def _probe_api_version(version):
     url = API_BASE + version + '/user.login.step'
     request = Request(
         url=url,
         data=json.dumps({}).encode('utf-8'),
-        headers={'Content-Type': 'application/json;charset=UTF-8'},
+        headers={
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            'Accept-Encoding': 'gzip',
+            'Accept': '*/*',
+            'Content-Type': 'application/json;charset=UTF-8',
+        },
         method='POST',
     )
     response = urlopen(request, timeout=10)
@@ -207,44 +224,7 @@ def check_api_version_if_due():
             _save_api_version_check(now)
             return current_version
 
-        candidate = 'v1.' + str(minor + 1).zfill(2)
-        try:
-            status = _probe_api_version(candidate)
-        except HTTPError as error:
-            if error.code == 400:
-                save_api_version(candidate)
-                save_json_data(_API_VERSION_PROBE_FILE, '{}')
-                _save_api_version_check(now)
-                log_message('Verze Oneplay API aktualizována na ' + candidate)
-                return candidate
-            if error.code == 404:
-                _save_api_version_check(now)
-                return current_version
-            if error.code == 429:
-                delay = _store_api_failure(
-                    'rate_limit',
-                    _retry_after_seconds(error.headers.get('Retry-After') if error.headers else None),
-                )
-                log_error('Kontrola verze API', 'Too Many Requests – další pokus za ' + str(delay) + ' s')
-                return current_version
-            if error.code == 408 or error.code >= 500:
-                _store_api_failure('transient')
-                return current_version
-            _save_api_version_check(now)
-            return current_version
-        except (URLError, OSError, socket.timeout, TimeoutError, WebSocketException) as error:
-            _store_api_failure('transient')
-            log_error('Kontrola verze API selhala', str(error))
-            return current_version
-
-        if status is None or 200 <= status < 300:
-            save_api_version(candidate)
-            save_json_data(_API_VERSION_PROBE_FILE, '{}')
-            _save_api_version_check(now)
-            log_message('Verze Oneplay API aktualizována na ' + candidate)
-            return candidate
-        _save_api_version_check(now)
-        return current_version
+        return get_api_version()
 
 
 def get_api_version():
@@ -253,45 +233,92 @@ def get_api_version():
         start_version = int(api_version.split('.')[1])
     except (IndexError, ValueError):
         return api_version
+
     probe_data = load_json_data(_API_VERSION_PROBE_FILE)
     try:
-        next_minor = int(json.loads(probe_data).get('next_minor', start_version + 1))
+        saved_next_minor = int(json.loads(probe_data).get('next_minor', start_version + 1)) if probe_data else start_version + 1
     except (AttributeError, TypeError, ValueError):
-        next_minor = start_version + 1
-    next_minor = max(start_version + 1, min(next_minor, _API_MAX_VERSION + 1))
+        saved_next_minor = start_version + 1
+    next_minor = max(start_version + 1, saved_next_minor)
     end_minor = min(next_minor + _API_VERSION_PROBE_BATCH, _API_MAX_VERSION + 1)
+    latest_version = api_version
+
+    def accept_latest():
+        if latest_version != api_version:
+            _accept_api_version(latest_version)
+            return latest_version
+        return api_version
+
     for minor in range(next_minor, end_minor):
         version = 'v1.' + str(minor).zfill(2)
         try:
             status = _probe_api_version(version)
             if status is None or 200 <= status < 300:
-                save_api_version(version)
-                save_json_data(_API_VERSION_PROBE_FILE, '{}')
+                latest_version = version
+                _save_api_version_probe(minor + 1)
+                continue
+            if 400 <= status < 500 and status not in (403, 408, 429, 404):
+                latest_version = version
+                _save_api_version_probe(minor + 1)
+                continue
+            if status == 404:
+                _save_api_version_probe(minor + 1)
+                if latest_version != api_version:
+                    return accept_latest()
+                continue
+            if status == 403:
+                log_error('Detekce verze API', 'HTTP 403 u ' + version + ' – verzi nelze ověřit')
+                result_version = accept_latest()
+                _save_api_version_probe(minor)
                 _save_api_version_check()
-                return version
-            return api_version
+                return result_version
+            if status == 429:
+                delay = _store_api_failure('rate_limit')
+                log_error('Detekce verze API', 'Too Many Requests – další pokus za ' + str(delay) + ' s')
+                return accept_latest()
+            if status == 408 or status is not None and status >= 500:
+                delay = _store_api_failure('transient')
+                log_error('Detekce verze API', 'HTTP ' + str(status) + ' u ' + version + ' – další pokus za ' + str(delay) + ' s')
+                return accept_latest()
+            log_error('Detekce verze API', 'Neočekávaný HTTP status ' + str(status) + ' u ' + version)
+            _save_api_version_probe(minor)
+            return accept_latest()
         except HTTPError as e:
             if e.code == 404:
+                _save_api_version_probe(minor + 1)
+                if latest_version != api_version:
+                    return accept_latest()
                 continue
-            if e.code == 400:
-                save_api_version(version)
-                save_json_data(_API_VERSION_PROBE_FILE, '{}')
+            if 400 <= e.code < 500 and e.code not in (403, 408, 429):
+                latest_version = version
+                _save_api_version_probe(minor + 1)
+                continue
+            if e.code == 403:
+                log_error('Detekce verze API', 'HTTP 403 u ' + version + ' – verzi nelze ověřit')
+                result_version = accept_latest()
+                _save_api_version_probe(minor)
                 _save_api_version_check()
-                return version
+                return result_version
             if e.code == 429:
                 delay = _store_api_failure(
                     'rate_limit',
                     _retry_after_seconds(e.headers.get('Retry-After') if e.headers else None),
                 )
                 log_error('Detekce verze API', 'Too Many Requests – další pokus za ' + str(delay) + ' s')
-                return api_version
+                return accept_latest()
             if e.code == 408 or e.code >= 500:
-                _store_api_failure('transient', _retry_after_seconds(e.headers.get('Retry-After') if e.headers else None))
-            return api_version
-    if end_minor <= _API_MAX_VERSION:
-        save_json_data(_API_VERSION_PROBE_FILE, json.dumps({'next_minor': end_minor}))
+                delay = _store_api_failure('transient', _retry_after_seconds(e.headers.get('Retry-After') if e.headers else None))
+                log_error('Detekce verze API', 'HTTP ' + str(e.code) + ' u ' + version + ' – další pokus za ' + str(delay) + ' s')
+                return accept_latest()
+            log_error('Detekce verze API', 'Neočekávaná HTTP chyba ' + str(e.code) + ' u ' + version)
+            _save_api_version_probe(minor)
+            return accept_latest()
+        except (URLError, OSError, socket.timeout, TimeoutError, WebSocketException) as error:
+            delay = _store_api_failure('transient')
+            log_error('Detekce verze API selhala', str(error) + ' (další pokus za ' + str(delay) + ' s)')
+            return accept_latest()
     _save_api_version_check()
-    return api_version
+    return accept_latest()
 
 
 def api_url(endpoint):
